@@ -6,11 +6,11 @@ from sklearn.datasets import fetch_lfw_people, load_digits
 from data import Data
 
 
-data, _ = load_digits(return_X_y=True, shuffle=True)
+data, _ = load_digits(return_X_y=True)
 data = data / 15
 h,b,c = 8,8,1
 
-# data, _ = fetch_lfw_people(return_X_y = True, shuffle=True, color=True)
+# data, _ = fetch_lfw_people(return_X_y = True, color=True)
 # h, b, c = 62,47,3
 
 dataset = Data(data)
@@ -36,6 +36,7 @@ plt.imshow(x_0.detach().view(h,b,c))
 
 """ Sample method 2 """
 
+
 x_t = torch.zeros((1, model.img_size))
 for t in tqdm(reversed(range(model.time_steps))):
     time_encoding = model.time_encoding(torch.tensor(t).view((1,)))
@@ -46,6 +47,8 @@ for t in tqdm(reversed(range(model.time_steps))):
 plt.imshow(x_t.detach().view(h,b,c))
 
 #%%
+""" Reconstructions given increasingly noisy images"""
+
 for j in [0, 100, 200, 300, 400]:
     ts = [100, 300, 500, 700, 900]
     fig,axs = plt.subplots(2,len(ts))
@@ -61,4 +64,7 @@ for j in [0, 100, 200, 300, 400]:
         axs[1,i].set_xticks([])
         axs[0,i].set_yticks([])
         axs[1,i].set_yticks([])
+        
+    axs[0,2].set_title("Increasingly noisy images")
+    axs[1,2].set_title("Reconstructions of above images")
     plt.show()
