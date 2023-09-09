@@ -1,5 +1,4 @@
 import torch
-import math
 import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
@@ -10,17 +9,17 @@ class Model(nn.Module):
         super().__init__()
         
         self.img_size = img_size
-        time_dim = int(img_size/4)
-        self.time_dim = time_dim if time_dim % 2 == 0 else time_dim + 1
+        self.time_dim = 128
         
-        
-        n_nodes = [128, 64, 32]
-        self.lin1 = nn.Linear(self.img_size + self.time_dim, n_nodes[0])
-        self.lin2 = nn.Linear(n_nodes[0], n_nodes[1])
-        self.lin3 = nn.Linear(n_nodes[1], n_nodes[2])
-        self.lin4 = nn.Linear(n_nodes[2], n_nodes[1])
-        self.lin5 = nn.Linear(n_nodes[1], n_nodes[0])
-        self.lin6 = nn.Linear(n_nodes[0], self.img_size)
+        self.conv1 = nn.Conv2d(1, 8, (4,4), (2,2))
+        self.conv2 = nn.Conv2d(8, 16, (3,3))
+        self.conv3 = nn.Conv2d(16, 32, (3, 3))
+        self.conv4 = nn.Conv2d(32, 64, (3,3))
+        self.conv5 = nn.Conv2d(64, 128, (3,3))
+        self.lin1 = nn.Linear(3328, 4096)
+        self.lin2 = nn.Linear(4096, 2048)
+        self.lin3 = nn.Linear(2048, 1024)
+        self.lin4 = nn.Linear(1024, 784)
         
         self.time_steps = time_steps
         self.beta_start = beta_start
@@ -38,21 +37,29 @@ class Model(nn.Module):
         self.beta_tilde[0] = 0
         
     def time_encoding(self, t):
-        frequencies = torch.exp(torch.arange(0, self.time_dim, 2).float() * -(math.log(10000.0) / self.time_dim))
+        frequencies = torch.arange(0, self.time_dim, 2) * torch.pi / self.time_steps
         angles = t.unsqueeze(1) * frequencies.unsqueeze(0)
         encodings = torch.cat([torch.sin(angles), torch.cos(angles)], dim=-1)
         
         return encodings     
     
     def forward(self, x, t):
-        y = torch.cat((x, t), dim=1)
+        x = x.view(-1, 28, 28, 1).permute(0, 3, 1, 2)
+        y = F.relu(self.conv1(x))
+        y = F.relu(self.conv2(y))
+        y = F.relu(self.conv3(y))
+        y = F.relu(self.conv4(y))
+        y = F.relu(self.conv5(y))
+        
+        y = torch.flatten(y, 1)
+        y = torch.cat((y, t), 1)
+        
         y = F.relu(self.lin1(y))
         y = F.relu(self.lin2(y))
         y = F.relu(self.lin3(y))
-        y = F.relu(self.lin4(y))
-        y = F.relu(self.lin5(y))
-        y = F.sigmoid(self.lin6(y))
-        
+        y = F.tanh(self.lin4(y))
+        y = (y + 1) / 2
+
         return y
         
     def train(self, epochs, dataloader):
@@ -63,12 +70,12 @@ class Model(nn.Module):
         for epoch in range(epochs):
             losses = torch.zeros(len(dataloader))
             
-            for i, x in enumerate(tqdm(dataloader)):
+            for i, x_0 in enumerate(tqdm(dataloader)):
                 ts = self.sample_time_steps(batch_size)
-                x_T, eps = self.make_noisy_image(x, ts)
+                x_t, eps = self.make_noisy_image(x_0, ts)
                 time_encodings = self.time_encoding(ts)
-                pred = self(x_T, time_encodings)
-                loss = mse(pred, x)
+                pred = self(x_t, time_encodings)
+                loss = mse(pred, x_0)
                 
                 optimizer.zero_grad()
                 loss.backward()
@@ -81,10 +88,10 @@ class Model(nn.Module):
         
     def make_noisy_image(self, x, t):
         t = t.view(-1, 1)
-        eps = torch.randn((len(t), x.shape[1])) 
-        sample = self.sqrt_alpha_hat[t] * x + self.sqrt_one_minus_alpha_hat[t] * eps
+        eps = torch.randn(x.shape)
+        x_t = self.sqrt_alpha_hat[t] * x + self.sqrt_one_minus_alpha_hat[t] * eps
         
-        return sample, eps
+        return x_t, eps
     
     def sample_time_steps(self, n):
         return torch.randint(0, self.time_steps - 1, (n,))
@@ -107,7 +114,7 @@ class Model(nn.Module):
             ax.set_yticks([])
         plt.show()
     
-    def reconstruc_noisy_image(self, image, t):
+    def reconstruct_noisy_image(self, image, t):
         t = torch.tensor(t).view((1,))
         enc = self.time_encoding(t)
         noisy, _ = self.make_noisy_image(image.view((1,-1)), t)
