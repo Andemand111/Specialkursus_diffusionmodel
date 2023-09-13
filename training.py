@@ -7,8 +7,7 @@ dataloader = DataLoader(dataset,
                         shuffle=True, 
                         drop_last=True)
 
-args = [dataset.size, 1000, 0.0001, 0.02]
-
+args = [dataset.dimensions, 1000, 0.0001, 0.02]
 model = Model(*args)
-model.train(6, dataloader)
+model.train(15, dataloader)
 model.save_model("diffusion_model")

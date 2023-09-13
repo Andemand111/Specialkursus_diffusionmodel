@@ -1,28 +1,27 @@
 from torch.utils.data import Dataset
-import torch
-import numpy as np
-import pandas as pd
+from PIL import Image
+from torchvision import transforms
 
-""" 
-Download mnist som csv her: 
-    https://www.kaggle.com/datasets/oddrationale/mnist-in-csv
-    
-"""
+convert_tensor = transforms.ToTensor()
 
 class Data(Dataset):
-    def __init__(self, data, dimensions):
+    def __init__(self, path, dimensions):
         super().__init__()
-        self.data = data
+        self.path = path
         self.dimensions = dimensions
-        self.size = np.prod(dimensions)
         
     def __len__(self):
-        return len(self.data)
+        return 202598
     
     def __getitem__(self, index):
-        pic = self.data[index]
-        return torch.from_numpy(pic).type(torch.float)
-    
-path = "../mnist_train.csv"
-data = pd.read_csv(path).to_numpy()[:, 1:] / 255
-dataset = Data(data, [28, 28, 1])
+        index += 1
+        n_zeros = 6 - len(str(index))
+        n = n_zeros * "0" + str(index)
+        img = Image.open(self.path + f'{n}.jpg')
+        img  = convert_tensor(img).flatten()
+        return img
+
+path = "G:/Mit drev/Uni/5. semester/specialkursus/celeba/img_align_celeba/img_align_celeba/"
+dataset = Data(path, [218, 178, 3])
+
+pic = dataset[0]

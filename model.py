@@ -5,21 +5,19 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 class Model(nn.Module):
-    def __init__(self, img_size, time_steps, beta_start, beta_end):
+    def __init__(self, dimensions, time_steps, beta_start, beta_end):
         super().__init__()
         
-        self.img_size = img_size
-        self.time_dim = 128
+        self.dimensions = dimensions
+        self.img_size = torch.tensor(dimensions).prod()
+        self.time_dim = 512
         
-        self.conv1 = nn.Conv2d(1, 8, (4,4), (2,2))
-        self.conv2 = nn.Conv2d(8, 16, (3,3))
-        self.conv3 = nn.Conv2d(16, 32, (3, 3))
-        self.conv4 = nn.Conv2d(32, 64, (3,3))
-        self.conv5 = nn.Conv2d(64, 128, (3,3))
-        self.lin1 = nn.Linear(3328, 4096)
-        self.lin2 = nn.Linear(4096, 2048)
-        self.lin3 = nn.Linear(2048, 1024)
-        self.lin4 = nn.Linear(1024, 784)
+        """
+        Der skal implementeres et netværk!
+        """
+
+
+        self.drop_out = nn.Dropout(p=0.1)
         
         self.time_steps = time_steps
         self.beta_start = beta_start
@@ -33,8 +31,9 @@ class Model(nn.Module):
         self.one_minus_alpha_hat = 1 - self.alpha_hat
         self.sqrt_one_minus_alpha_hat = torch.sqrt(self.one_minus_alpha_hat)
         
-        self.beta_tilde = (1 - torch.roll(self.alpha_hat, 1)) / (1 - self.alpha_hat) * self.beta
-        self.beta_tilde[0] = 0
+        self.sigma_sq = (1 - self.alpha) * torch.roll(self.one_minus_alpha_hat, 1) / self.one_minus_alpha_hat
+        self.sigma_sq[0] = 0
+        self.sigma = torch.sqrt(self.sigma_sq)
         
     def time_encoding(self, t):
         frequencies = torch.arange(0, self.time_dim, 2) * torch.pi / self.time_steps
@@ -44,27 +43,15 @@ class Model(nn.Module):
         return encodings     
     
     def forward(self, x, t):
-        x = x.view(-1, 28, 28, 1).permute(0, 3, 1, 2)
-        y = F.relu(self.conv1(x))
-        y = F.relu(self.conv2(y))
-        y = F.relu(self.conv3(y))
-        y = F.relu(self.conv4(y))
-        y = F.relu(self.conv5(y))
-        
-        y = torch.flatten(y, 1)
-        y = torch.cat((y, t), 1)
-        
-        y = F.relu(self.lin1(y))
-        y = F.relu(self.lin2(y))
-        y = F.relu(self.lin3(y))
-        y = F.tanh(self.lin4(y))
-        y = (y + 1) / 2
+        """
+        Her skal billedet køres igennem netværket!
+        """
 
         return y
         
     def train(self, epochs, dataloader):
-        optimizer = torch.optim.Adam(self.parameters())
-        mse = nn.MSELoss()
+        optimizer = torch.optim.Adam(self.parameters(), lr=1e-4, weight_decay=1e-5)
+        cost = nn.MSELoss()
         batch_size = dataloader.batch_size
         
         for epoch in range(epochs):
@@ -75,16 +62,19 @@ class Model(nn.Module):
                 x_t, eps = self.make_noisy_image(x_0, ts)
                 time_encodings = self.time_encoding(ts)
                 pred = self(x_t, time_encodings)
-                loss = mse(pred, x_0)
+                loss = cost(pred, x_0)
                 
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
+                print(loss.item())
                 
                 losses[i] = loss.item()
                 
             print(f"Epoch: {epoch}")
             print(losses.mean().item())
+            self.sample_and_show_image(f"Result after epoch: {epoch}")
+
         
     def make_noisy_image(self, x, t):
         t = t.view(-1, 1)
@@ -120,4 +110,21 @@ class Model(nn.Module):
         noisy, _ = self.make_noisy_image(image.view((1,-1)), t)
         reconstructed = self(noisy.view(1,-1), enc)
         return reconstructed.detach()
-        
+    
+    def sample_image(self):
+        x_t = torch.randn((1,self.img_size))
+        for t in reversed(range(1, self.time_steps)):
+            t_enc = self.time_encoding(torch.tensor(t).view((1,)))
+            x_0 = self(x_t, t_enc)
+            k1 = self.sqrt_alpha[t] * self.one_minus_alpha_hat[t - 1] * x_t
+            k2 = self.sqrt_alpha_hat[t - 1] * (1 - self.alpha[t]) * x_0
+            k3 = self.one_minus_alpha_hat[t]
+            k4 = self.sigma[t] * torch.randn_like(self.sigma[t])
+            x_t = (k1 + k2) / k3 + k4
+        return x_t.detach()
+    
+    def sample_and_show_image(self, title=""):
+        x_t = self.sample_image()
+        plt.imshow(x_t.view(*self.dimensions), cmap="gray")
+        plt.title(title)
+        plt.show()
