@@ -1,7 +1,8 @@
 from torch.utils.data import DataLoader
 from model import Model
-from data import dataset
+from data import Cifar10
 
+dataset = Cifar10()
 dataloader = DataLoader(dataset, 
                         batch_size=64, 
                         shuffle=True, 

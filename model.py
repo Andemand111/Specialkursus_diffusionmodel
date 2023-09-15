@@ -12,9 +12,32 @@ class Model(nn.Module):
         self.img_size = torch.tensor(dimensions).prod()
         self.time_dim = 512
         
-        """
-        Der skal implementeres et netværk!
-        """
+        self.downsample = nn.Sequential(
+            nn.Conv2d(3, 64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(64, 128, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+        )
+        
+        self.linear_layers = nn.Sequential(
+            nn.Linear(128 * 8 * 8 + self.time_dim, 1024), 
+            nn.ReLU(),
+            nn.Linear(1024, 2048),
+            nn.ReLU(),
+            nn.Linear(2048, 1024),
+            nn.ReLU(),
+            nn.Linear(1024, 128 * 8 * 8),
+            nn.ReLU()
+        )
+        
+        self.upsample = nn.Sequential(
+            nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1),
+            nn.ReLU(),
+            nn.ConvTranspose2d(64, 3, kernel_size=4, stride=2, padding=1),
+            nn.Sigmoid()  # Use Sigmoid activation for the final output to ensure pixel values between 0 and 1
+        )
 
 
         self.drop_out = nn.Dropout(p=0.1)
@@ -43,9 +66,19 @@ class Model(nn.Module):
         return encodings     
     
     def forward(self, x, t):
-        """
-        Her skal billedet køres igennem netværket!
-        """
+        x = x.view(-1, 3, 32, 32)
+
+        y = self.downsample(x)
+
+        y = torch.flatten(y, 1)
+        y = torch.cat((y,t), 1) 
+
+        y = self.linear_layers(y)
+
+        y = y.view(-1, 128, 8, 8)
+
+        y = self.upsample(y)
+        y = torch.flatten(y, 1)
 
         return y
         
@@ -67,12 +100,12 @@ class Model(nn.Module):
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-                print(loss.item())
                 
                 losses[i] = loss.item()
                 
             print(f"Epoch: {epoch}")
             print(losses.mean().item())
+        
             self.sample_and_show_image(f"Result after epoch: {epoch}")
 
         
@@ -125,6 +158,6 @@ class Model(nn.Module):
     
     def sample_and_show_image(self, title=""):
         x_t = self.sample_image()
-        plt.imshow(x_t.view(*self.dimensions), cmap="gray")
+        plt.imshow(x_t.view(*self.dimensions).permute(1, 2, 0), cmap="gray")
         plt.title(title)
         plt.show()
