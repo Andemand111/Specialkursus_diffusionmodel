@@ -1,8 +1,8 @@
 from torch.utils.data import DataLoader
 from model import Model
-from data import Cifar10
+from data import Cifar10, Faces
 
-dataset = Cifar10()
+dataset = Faces()
 dataloader = DataLoader(dataset, 
                         batch_size=64, 
                         shuffle=True, 
@@ -10,5 +10,11 @@ dataloader = DataLoader(dataset,
 
 args = [dataset.dimensions, 1000, 0.0001, 0.02]
 model = Model(*args)
-model.train(15, dataloader)
-model.save_model("diffusion_model")
+filename = "diffusion_model"
+
+try:
+    model.load_model(filename)
+except:
+    pass
+
+model.train(30, dataloader, filename)
