@@ -4,6 +4,7 @@ from torchvision import transforms
 import pickle
 import torch
 import matplotlib.pyplot as plt
+import pandas as pd
 
 class Faces(Dataset):
     def __init__(self):
@@ -16,7 +17,7 @@ class Faces(Dataset):
         return convert_tensor(t)
 
     def __len__(self):
-        return 202599
+        return 20_000
     
     def __getitem__(self, index):
         index += 1
@@ -27,6 +28,19 @@ class Faces(Dataset):
         img = transforms.Resize(self.dimensions[1:], antialias=None)(img).flatten()
         return img
 
+class MNIST(Dataset):
+    def __init__(self):
+        super().__init__()
+        self.dimensions = [1, 28, 28]
+        path = "G:/Mit drev/Uni/5. semester/specialkursus"
+        self.data = pd.read_csv(path + "/mnist_train.csv").to_numpy()
+        self.data = torch.tensor(self.data[:, 1:])
+    
+    def __len__(self):
+        return 60_000
+    
+    def __getitem__(self, index):
+        return self.data[index]
 
 class Cifar10(Dataset):
     def __init__(self):
@@ -51,4 +65,3 @@ class Cifar10(Dataset):
     def __getitem__(self, index):
         return self.data[index].flatten(), self.labels[index]
     
-dataset = Faces()
