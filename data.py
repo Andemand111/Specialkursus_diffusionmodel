@@ -17,7 +17,7 @@ class Faces(Dataset):
         return convert_tensor(t)
 
     def __len__(self):
-        return 20_000
+        return 202599
     
     def __getitem__(self, index):
         index += 1
@@ -34,10 +34,11 @@ class MNIST(Dataset):
         self.dimensions = [1, 28, 28]
         path = "G:/Mit drev/Uni/5. semester/specialkursus"
         self.data = pd.read_csv(path + "/mnist_train.csv").to_numpy()
-        self.data = torch.tensor(self.data[:, 1:])
+        self.data = torch.tensor(self.data[:, 1:]) / 255
+        self.data = self.data
     
     def __len__(self):
-        return 60_000
+        return 60000
     
     def __getitem__(self, index):
         return self.data[index]

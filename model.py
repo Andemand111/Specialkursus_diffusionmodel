@@ -14,65 +14,21 @@ class Model(nn.Module):
         self.time_dim = dimensions[1] * dimensions[2]
 
         self.downsample = nn.Sequential(
-            nn.Unflatten(1, (4, 64, 64)),
-
-            nn.Conv2d(4, 32, kernel_size=3, padding=1),
+            nn.Linear(self.img_size + self.time_dim, 512),
             nn.LeakyReLU(),
-            nn.Conv2d(32, 32, kernel_size=3, padding=1),
+            nn.Linear(512, 512),
             nn.LeakyReLU(),
-            nn.MaxPool2d(2),
-
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.Linear(512, 64),
             nn.LeakyReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, padding=1),
-            nn.LeakyReLU(),
-            nn.MaxPool2d(2),
-
-            nn.Conv2d(64, 128, kernel_size=3, padding=1),
-            nn.LeakyReLU(),
-            nn.Conv2d(128, 128, kernel_size=3, padding=1),
-            nn.LeakyReLU(),
-            nn.MaxPool2d(2),
-
-            nn.Conv2d(128, 256, kernel_size=3, padding=1),
-            nn.LeakyReLU(),
-            nn.Conv2d(256, 256, kernel_size=3, padding=1),
-            nn.LeakyReLU(),
-            nn.MaxPool2d(2),
-
-            nn.Flatten()
         )
 
         self.upsample = nn.Sequential(
-            nn.Unflatten(1, (256, 4, 4)),
-
-            nn.ConvTranspose2d(256, 128, kernel_size=3, padding=1),
+            nn.Linear(64, 512),
             nn.LeakyReLU(),
-            nn.ConvTranspose2d(128, 128, kernel_size=3, padding=1),
+            nn.Linear(512, 512),
             nn.LeakyReLU(),
-            nn.Upsample(scale_factor=2),
-
-            nn.ConvTranspose2d(128, 64, kernel_size=3, padding=1),
-            nn.LeakyReLU(),
-            nn.ConvTranspose2d(64, 64, kernel_size=3, padding=1),
-            nn.LeakyReLU(),
-            nn.Upsample(scale_factor=2),
-
-            nn.ConvTranspose2d(64, 32, kernel_size=3, padding=1),
-            nn.LeakyReLU(),
-            nn.ConvTranspose2d(32, 32, kernel_size=3, padding=1),
-            nn.LeakyReLU(),
-            nn.Upsample(scale_factor=2),
-
-            nn.ConvTranspose2d(32, 16, kernel_size=3, padding=1),
-            nn.LeakyReLU(),
-            nn.ConvTranspose2d(16, 16, kernel_size=3, padding=1),
-            nn.LeakyReLU(),
-            nn.Upsample(scale_factor=2),
-
-            nn.ConvTranspose2d(16, 3, kernel_size=3, padding=1),
+            nn.Linear(512, self.img_size),
             nn.Sigmoid(),
-            nn.Flatten()
         )
 
         self.time_steps = time_steps
@@ -87,8 +43,7 @@ class Model(nn.Module):
         self.one_minus_alpha_hat = 1 - self.alpha_hat
         self.sqrt_one_minus_alpha_hat = torch.sqrt(self.one_minus_alpha_hat)
 
-        self.sigma_sq = (
-            1 - self.alpha) * torch.roll(self.one_minus_alpha_hat, 1) / self.one_minus_alpha_hat
+        self.sigma_sq = (1 - self.alpha) * torch.roll(self.one_minus_alpha_hat, 1) / self.one_minus_alpha_hat
         self.sigma_sq[0] = 0
         self.sigma = torch.sqrt(self.sigma_sq)
 
@@ -128,12 +83,12 @@ class Model(nn.Module):
                 losses[i] = loss.item()
 
             print(f"Epoch: {epoch}")
-            print(losses.mean().item())
+            print("loss: ", losses.mean().item())
             self.save_model(filename)
 
             self.sample_and_show_image(f"Result after epoch: {epoch}")
-            self.view_reconstructed_images(x_0[0], 200)
-            self.view_reconstructed_images(x_0[0], 500)
+            self.view_reconstructed_images(x_0[0], 100)
+            self.view_reconstructed_images(x_0[0], 400)
             self.view_reconstructed_images(x_0[0], 800)
 
     def make_noisy_image(self, x, t):
@@ -183,7 +138,7 @@ class Model(nn.Module):
         plt.show()
 
     def sample_image(self, x_T = None):
-        x_t = torch.randn((1, self.img_size)) if x_t == None else x_T
+        x_t = torch.randn((1, self.img_size)) if x_T == None else x_T
         for t in reversed(range(1, self.time_steps)):
             t_enc = self.time_encoding(torch.tensor(t).view((1,)))
             x_0 = self(x_t, t_enc)
