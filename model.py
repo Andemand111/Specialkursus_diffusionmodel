@@ -47,6 +47,8 @@ class Model(nn.Module):
         self.sigma_sq[0] = 0
         self.sigma = torch.sqrt(self.sigma_sq)
 
+        self.time_encodings = self.time_encoding(torch.arange(1, time_steps))
+
     def time_encoding(self, t):
         frequencies = torch.arange(0, self.time_dim, 2) * torch.pi / self.time_steps
         angles = t.unsqueeze(1) * frequencies.unsqueeze(0)
@@ -70,12 +72,7 @@ class Model(nn.Module):
             losses = torch.zeros(len(dataloader))
 
             for i, x_0 in enumerate(tqdm(dataloader)):
-                ts = self.sample_time_steps(batch_size)
-                x_t, eps = self.make_noisy_image(x_0, ts)
-                time_encodings = self.time_encoding(ts)
-                pred = self(x_t, time_encodings)
-                loss = cost(pred, x_0)
-
+                loss = self.ELBO(x_0)
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
@@ -96,6 +93,20 @@ class Model(nn.Module):
         x_t = mu + std * eps
 
         return x_t, eps
+    
+    def ELBO(self, x_0s):
+        kls = torch.zeros(len(x_0s))
+        for i, x_0 in enumerate(x_0s):
+            q_x_ts, _ = self.make_noisy_image(x_0, torch.arange(1, self.time_steps))
+            p_x_ts = torch.zeros_like(q_x_ts)
+            p_x_ts[-1] = self(q_x_ts[-1], self.time_encodings[-1])
+            for t in reversed(range(1, self.time_steps)):
+                p_x_ts[t - 1] = self(p_x_ts[t].detach(), self.time_encodings[t])
+            
+            kl = 1 / (1 - self.alpha[t]) * (q_x_ts[:-1] - p_x_ts[1:]).pow(2).sum(dim=1)
+            kls[i] = kl.mean()
+
+        return kls.mean()
 
     def sample_time_steps(self, n):
         return torch.randint(1, self.time_steps - 1, (n,))
