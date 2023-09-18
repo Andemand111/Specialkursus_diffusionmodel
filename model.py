@@ -11,7 +11,7 @@ class Model(nn.Module):
 
         self.dimensions = dimensions
         self.img_size = torch.tensor(dimensions).prod()
-        self.time_dim = dimensions[1] * dimensions[2]
+        self.time_dim = 128
 
         self.downsample = nn.Sequential(
             nn.Linear(self.img_size + self.time_dim, 512),
@@ -28,7 +28,7 @@ class Model(nn.Module):
             nn.Linear(512, 512),
             nn.LeakyReLU(),
             nn.Linear(512, self.img_size),
-            nn.Sigmoid(),
+            nn.Tanh(),
         )
 
         self.time_steps = time_steps
@@ -87,20 +87,18 @@ class Model(nn.Module):
             self.save_model(filename)
 
             self.sample_and_show_image(f"Result after epoch: {epoch}")
-            self.view_reconstructed_images(x_0[0], 100)
-            self.view_reconstructed_images(x_0[0], 400)
-            self.view_reconstructed_images(x_0[0], 800)
 
-    def make_noisy_image(self, x, t):
+    def make_noisy_image(self, x_0, t):
         t = t.view(-1, 1)
-        eps = torch.randn(x.shape)
-        x_t = self.sqrt_alpha_hat[t] * x + \
-            self.sqrt_one_minus_alpha_hat[t] * eps
+        eps = torch.randn(x_0.shape)
+        mu = self.sqrt_alpha_hat[t] * x_0
+        std  = self.sqrt_one_minus_alpha_hat[t]
+        x_t = mu + std * eps
 
         return x_t, eps
 
     def sample_time_steps(self, n):
-        return torch.randint(0, self.time_steps - 1, (n,))
+        return torch.randint(1, self.time_steps - 1, (n,))
 
     def save_model(self, filename):
         torch.save(self.state_dict(), filename)
@@ -110,46 +108,23 @@ class Model(nn.Module):
         self.load_state_dict(torch.load(filename, map_location="cpu"))
         print("Model loaded!")
 
-    def reconstruct_noisy_image(self, image, t):
-        t = torch.tensor(t).view((1,))
-        enc = self.time_encoding(t)
-        noisy, _ = self.make_noisy_image(image.view((1, -1)), t)
-        reconstructed = self(noisy.view(1, -1), enc)
-        return noisy.detach(), reconstructed.detach()
+    def get_prior_sample(self, x_t, t):
+        t_enc = self.time_encoding(torch.tensor(t).view((1,)))
+        x_0 = self(x_t, t_enc)
+        k1 = self.sqrt_alpha[t] * self.one_minus_alpha_hat[t - 1] * x_t
+        k2 = self.sqrt_alpha_hat[t - 1] * (1 - self.alpha[t]) * x_0
+        x_t = (k1 + k2) / self.one_minus_alpha_hat[t]
+        if t > 1:
+            x_t += torch.randn_like(x_t) * self.sigma[t]
 
-    def view_reconstructed_images(self, x, t):
-        noisy, reconstructed = self.reconstruct_noisy_image(x, t)
-        noisy = torch.clamp(noisy, 0, 1)
-        fig, axs = plt.subplots(1, 3)
-        fig.suptitle(f'Timestep {t}', fontsize=16)
-        axs[0].imshow(x.view(*self.dimensions).permute(1, 2, 0))
-        axs[0].set_title("Original")
-        axs[0].set_xticks([])
-        axs[0].set_yticks([])
-        axs[1].imshow(noisy.view(*self.dimensions).permute(1, 2, 0))
-        axs[1].set_title("Noisy")
-        axs[1].set_xticks([])
-        axs[1].set_yticks([])
-        axs[2].imshow(reconstructed.view(*self.dimensions).permute(1, 2, 0))
-        axs[2].set_title("Reconstructed")
-        axs[2].set_xticks([])
-        axs[2].set_yticks([])
-
-        plt.show()
+        return x_t
 
     def sample_image(self, x_T = None):
         x_t = torch.randn((1, self.img_size)) if x_T == None else x_T
         for t in reversed(range(1, self.time_steps)):
-            t_enc = self.time_encoding(torch.tensor(t).view((1,)))
-            x_0 = self(x_t, t_enc)
-            k1 = self.sqrt_alpha[t] * self.one_minus_alpha_hat[t - 1] * x_t
-            k2 = self.sqrt_alpha_hat[t - 1] * (1 - self.alpha[t]) * x_0
-            k3 = self.one_minus_alpha_hat[t]
-            k4 = self.sigma[t] * torch.randn_like(self.sigma[t])
-            x_t = (k1 + k2) / k3
-            if t > 1:
-                x_t += k4
+            x_t = self.get_prior_sample(x_t, t)
 
+        x_t = x_t * 0.5 + 0.5
         x_t = torch.clamp(x_t, 0, 1)
         return x_t.detach()
 

@@ -41,7 +41,7 @@ class MNIST(Dataset):
         return 60000
     
     def __getitem__(self, index):
-        return self.data[index]
+        return self.data[index] * 2 - 1
 
 class Cifar10(Dataset):
     def __init__(self):
