@@ -11,24 +11,53 @@ class Model(nn.Module):
 
         self.dimensions = dimensions
         self.img_size = torch.tensor(dimensions).prod()
-        self.time_dim = 128
+        self.time_dim = dimensions[1] * dimensions[2]
 
         self.downsample = nn.Sequential(
-            nn.Linear(self.img_size + self.time_dim, 512),
+            nn.Unflatten(1, (2, 28, 28)),
+            nn.Conv2d(2, 16, kernel_size=5, stride=1, padding=2), 
+            nn.BatchNorm2d(16),
+            nn.Dropout2d(0.2),
             nn.LeakyReLU(),
-            nn.Linear(512, 512),
+            nn.Conv2d(16, 32, kernel_size=5, stride=1, padding=2),
+            nn.BatchNorm2d(32),
+            nn.Dropout2d(0.2),
             nn.LeakyReLU(),
-            nn.Linear(512, 64),
+            nn.MaxPool2d(2),
+            nn.Conv2d(32, 64, kernel_size=5, stride=1, padding=2),
+            nn.BatchNorm2d(64),
+            nn.Dropout2d(0.2),
+            nn.LeakyReLU(),
+            nn.MaxPool2d(2),
+            nn.Flatten(),
+            nn.Linear(7 * 7 * 64, 512),
             nn.LeakyReLU(),
         )
 
         self.upsample = nn.Sequential(
-            nn.Linear(64, 512),
+            nn.Linear(512, 7 * 7 * 64),
             nn.LeakyReLU(),
-            nn.Linear(512, 512),
+            nn.Unflatten(1, (64, 7, 7)),
+            nn.ConvTranspose2d(64, 32, kernel_size=5, stride=2, padding=2, output_padding=1),
+            nn.BatchNorm2d(32),
+            nn.Dropout2d(0.2),
             nn.LeakyReLU(),
-            nn.Linear(512, self.img_size),
-            nn.Tanh(),
+            nn.ConvTranspose2d(32, 16, kernel_size=5, stride=2, padding=2, output_padding=1),
+            nn.BatchNorm2d(16),
+            nn.Dropout2d(0.2),
+            nn.LeakyReLU(),
+            nn.ConvTranspose2d(16, 16, kernel_size=5, stride=1, padding=2),  
+            nn.BatchNorm2d(16),
+            nn.Dropout2d(0.2),
+            nn.LeakyReLU(),
+            nn.ConvTranspose2d(16, 8, kernel_size=5, stride=1, padding=2),
+            nn.BatchNorm2d(8),
+            nn.Dropout2d(0.2),
+            nn.LeakyReLU(),
+            nn.Flatten(),
+            nn.Linear(8 * 28 * 28, 1024),
+            nn.LeakyReLU(),
+            nn.Linear(1024, self.img_size),
         )
 
         self.time_steps = time_steps
@@ -74,7 +103,7 @@ class Model(nn.Module):
                 x_t, eps = self.make_noisy_image(x_0, ts)
                 time_encodings = self.time_encoding(ts)
                 pred = self(x_t, time_encodings)
-                loss = cost(pred, x_0)
+                loss = cost(pred, eps)
 
                 optimizer.zero_grad()
                 loss.backward()
