@@ -47,7 +47,8 @@ class Model(nn.Module):
         self.sigma_sq[0] = 0
         self.sigma = torch.sqrt(self.sigma_sq)
 
-        self.time_encodings = self.time_encoding(torch.arange(1, time_steps))
+        self.ts = torch.arange(1, time_steps)
+        self.time_encodings = self.time_encoding(self.ts)
 
     def time_encoding(self, t):
         frequencies = torch.arange(0, self.time_dim, 2) * torch.pi / self.time_steps
@@ -92,21 +93,19 @@ class Model(nn.Module):
         std  = self.sqrt_one_minus_alpha_hat[t]
         x_t = mu + std * eps
 
-        return x_t, eps
+        return x_t, mu
     
     def ELBO(self, x_0s):
-        kls = torch.zeros(len(x_0s))
+        elbo = torch.zeros(len(x_0s))
         for i, x_0 in enumerate(x_0s):
-            q_x_ts, _ = self.make_noisy_image(x_0, torch.arange(1, self.time_steps))
-            p_x_ts = torch.zeros_like(q_x_ts)
-            p_x_ts[-1] = self(q_x_ts[-1], self.time_encodings[-1])
-            for t in reversed(range(1, self.time_steps)):
-                p_x_ts[t - 1] = self(p_x_ts[t].detach(), self.time_encodings[t])
-            
-            kl = 1 / (1 - self.alpha[t]) * (q_x_ts[:-1] - p_x_ts[1:]).pow(2).sum(dim=1)
-            kls[i] = kl.mean()
+            q_x_ts, mu = self.make_noisy_image(x_0, self.ts)
+            p_x_ts = self(q_x_ts, self.time_encodings)
+            kl = (p_x_ts - mu).pow(2) /  (2 * self.one_minus_alpha_hat[1:].view(-1, 1))
+            reconstruction = (p_x_ts[0] - x_0).pow(2) / (2 * self.one_minus_alpha_hat[0])
 
-        return kls.mean()
+            elbo[i] = kl.sum() + reconstruction.sum()
+
+        return elbo.mean()
 
     def sample_time_steps(self, n):
         return torch.randint(1, self.time_steps - 1, (n,))
@@ -120,13 +119,9 @@ class Model(nn.Module):
         print("Model loaded!")
 
     def get_prior_sample(self, x_t, t):
-        t_enc = self.time_encoding(torch.tensor(t).view((1,)))
-        x_0 = self(x_t, t_enc)
-        k1 = self.sqrt_alpha[t] * self.one_minus_alpha_hat[t - 1] * x_t
-        k2 = self.sqrt_alpha_hat[t - 1] * (1 - self.alpha[t]) * x_0
-        x_t = (k1 + k2) / self.one_minus_alpha_hat[t]
-        if t > 1:
-            x_t += torch.randn_like(x_t) * self.sigma[t]
+        mu = self(x_t, self.time_encodings[t - 1].view(1, -1))
+        eps = torch.randn(x_t.shape)
+        x_t = mu + self.one_minus_alpha_hat[t] * eps
 
         return x_t
 

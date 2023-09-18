@@ -8,7 +8,7 @@ dataloader = DataLoader(dataset,
                         shuffle=True, 
                         drop_last=True)
 
-args = [dataset.dimensions, 1000, 0.0001, 0.02]
+args = [dataset.dimensions, 100, 0.0001, 0.02]
 model = Model(*args)
 filename = "diffusion_model"
 

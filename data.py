@@ -38,7 +38,7 @@ class MNIST(Dataset):
         self.data = self.data
     
     def __len__(self):
-        return 60000
+        return 5000
     
     def __getitem__(self, index):
         return self.data[index] * 2 - 1
