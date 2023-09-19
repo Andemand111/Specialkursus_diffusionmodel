@@ -4,7 +4,6 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-
 class Model(nn.Module):
     def __init__(self, dimensions, time_steps, beta_start, beta_end):
         super().__init__()
@@ -58,6 +57,7 @@ class Model(nn.Module):
             nn.Linear(8 * 28 * 28, 1024),
             nn.LeakyReLU(),
             nn.Linear(1024, self.img_size),
+            nn.Tanh(),
         )
 
         self.time_steps = time_steps
@@ -103,7 +103,7 @@ class Model(nn.Module):
                 x_t, eps = self.make_noisy_image(x_0, ts)
                 time_encodings = self.time_encoding(ts)
                 pred = self(x_t, time_encodings)
-                loss = cost(pred, eps)
+                loss = cost(pred, x_0)
 
                 optimizer.zero_grad()
                 loss.backward()
