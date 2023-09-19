@@ -1,85 +1,81 @@
-from model import Model
 import torch
-from tqdm import tqdm
-import matplotlib.pyplot as plt
-from data import dataset
-import numpy as np
-#%%
-args = [dataset.size, 1000, 0.0001, 0.01]
-model = Model(*args)
-model.load_model("diffusion_model")
+import torch.nn as nn
 
-#%%
-""" Sample method 1 """
-x_t = torch.randn((1, model.img_size))
-for t in tqdm(reversed(range(model.time_steps))):
-    t = torch.tensor(t)
-    time_encoding = model.time_encoding(t.view((1,)))
-    x_0 = model(x_t, time_encoding)
-
-    if t > 0:
-        x_t, _ = model.make_noisy_image(x_0, t)
+class SelfAttention(nn.Module):
+    def __init__(self, in_channels, heads):
+        super(SelfAttention, self).__init__()
+        self.heads = heads
+        self.head_dim = in_channels // heads
+        self.scale = self.head_dim ** -0.5  # Scaling factor
         
-plt.imshow(x_0.detach().view(*dataset.dimensions))
-
-#%%
-
-""" Sample method 2 """
-
-
-x_t = torch.zeros((1, model.img_size))
-for t in tqdm(reversed(range(model.time_steps))):
-    time_encoding = model.time_encoding(torch.tensor(t).view((1,)))
-    noise = torch.randn_like(x_t)
-    noise_scale = 1.0 / ((t + 1) ** 0.5)
-    x_t = model(x_t + noise_scale * noise, time_encoding)
-
-plt.imshow(x_t.detach().view(*dataset.dimensions))
-
-#%%
-"""sample method 3"""
-""" 
-ligesom den i pdf'en, men den giver nogenlunde
-samme resultater som sample method 1
-"""
-
-x_t = torch.randn((1, model.img_size))
-for t in tqdm(reversed(range(model.time_steps))):
-    t_enc = torch.tensor(t).view((1,))
-    time_encoding = model.time_encoding(t_enc)
-    x_0 = model(x_t, time_encoding)
-    eps = (x_t - model.sqrt_alpha_hat[t] * x_0) / model.sqrt_one_minus_alpha_hat[t]
-    
-    k1 = 1 / model.sqrt_alpha[t]
-    k2 = (1 - model.alpha[t]) / model.sqrt_one_minus_alpha_hat[t]
-    x_t = k1 * (x_t - k2 * eps)
-    if t > 0:
-        sigma_sq = (1 - model.alpha[t]) * (1 - model.alpha_hat[t - 1]) / (1 - model.alpha_hat[t])
-        z = torch.randn_like(eps)
-        x_t += torch.sqrt(sigma_sq) * z
-    
-plt.imshow(x_t.detach().view(*dataset.dimensions))
-
-
-#%%
-""" Reconstructions given increasingly noisy images"""
-
-for j in np.random.randint(len(dataset), size=5):
-    ts = [100, 300, 500, 700, 900]
-    fig,axs = plt.subplots(2,len(ts))
-    for i, t in enumerate(ts):
-        t = torch.tensor(t).view((1,))
-        enc = model.time_encoding(t)
-        noisy, _ = model.make_noisy_image(dataset[j].view((1,-1)), t)
-        noisy = torch.clamp(noisy, 0, 1)
-        reconstructed = model(noisy.view(1,-1), enc).detach()
-        axs[0,i].imshow(noisy.view(*dataset.dimensions))
-        axs[1,i].imshow(reconstructed.view(*dataset.dimensions))
-        axs[0,i].set_xticks([])
-        axs[1,i].set_xticks([])
-        axs[0,i].set_yticks([])
-        axs[1,i].set_yticks([])
+        # Linear transformations for Q, K, and V
+        self.to_queries = nn.Conv2d(in_channels, in_channels, kernel_size=1)
+        self.to_keys = nn.Conv2d(in_channels, in_channels, kernel_size=1)
+        self.to_values = nn.Conv2d(in_channels, in_channels, kernel_size=1)
         
-    axs[0,2].set_title("Increasingly noisy images")
-    axs[1,2].set_title("Reconstructions of above images")
-    plt.show()
+        # Output convolutional layer for merging the heads
+        self.merge_heads = nn.Conv2d(in_channels, in_channels, kernel_size=1)
+        
+    def forward(self, x):
+        B, C, H, W = x.size()
+        
+        # Linearly transform the input to Q, K, and V
+        queries = self.to_queries(x).view(B, self.heads, self.head_dim, H, W)
+        keys = self.to_keys(x).view(B, self.heads, self.head_dim, H, W)
+        values = self.to_values(x).view(B, self.heads, self.head_dim, H, W)
+        
+        # Permute dimensions for compatibility with batch matrix multiplication
+        queries = queries.permute(0, 1, 3, 4, 2).contiguous().view(B * self.heads, H * W, self.head_dim)
+        keys = keys.permute(0, 1, 3, 4, 2).contiguous().view(B * self.heads, H * W, self.head_dim)
+        values = values.permute(0, 1, 3, 4, 2).contiguous().view(B * self.heads, H * W, self.head_dim)
+        
+        # Compute scaled dot-product attention
+        attention = torch.matmul(queries, keys.permute(0, 2, 1)) * self.scale
+        attention = torch.nn.functional.softmax(attention, dim=-1)
+        out = torch.matmul(attention, values).view(B, self.heads, H, W, self.head_dim)
+        
+        # Merge the heads
+        out = out.permute(0, 4, 1, 2, 3).contiguous().view(B, C, H, W)
+        out = self.merge_heads(out)
+        
+        return out
+
+class DeepConvSelfAttentionNetwork(nn.Module):
+    def __init__(self, in_channels, out_channels, heads, num_layers):
+        super(DeepConvSelfAttentionNetwork, self).__init__()
+        
+        # Initial convolutional layer
+        self.initial_conv = nn.Conv2d(in_channels, 64, kernel_size=3, padding=1)
+        
+        # Stack of convolutional layers and self-attention blocks
+        self.layers = nn.ModuleList([
+            nn.Sequential(
+                nn.Conv2d(64, 64, kernel_size=3, padding=1),
+                nn.ReLU(),
+                SelfAttention(64, heads)
+            )
+            for _ in range(num_layers)
+        ])
+        
+        # Output convolutional layer
+        self.out_conv = nn.Conv2d(64, out_channels, kernel_size=3, padding=1)
+        
+    def forward(self, x):
+        x = torch.relu(self.initial_conv(x))
+        
+        for layer in self.layers:
+            x = layer(x)
+        
+        x = self.out_conv(x)
+        return x
+
+# Example usage
+n = 3  # Adjust this to the number of output channels you need
+num_layers = 4  # Adjust the number of layers as desired
+model = DeepConvSelfAttentionNetwork(n + 1, n, heads=4, num_layers=num_layers)
+
+# Test with random input
+input_image = torch.randn(1, n + 1, 28,28)  # Batch size 1, (n + 1) channels, 64x64 image
+output_image = model(input_image)
+
+print(output_image.size())  # Should be [1, n, 64, 64]

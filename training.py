@@ -4,7 +4,7 @@ from data import Cifar10, Faces, MNIST
 
 dataset = MNIST()
 dataloader = DataLoader(dataset, 
-                        batch_size=64, 
+                        batch_size=128, 
                         shuffle=True, 
                         drop_last=True)
 
