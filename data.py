@@ -59,11 +59,11 @@ class Cifar10(Dataset):
 
         self.labels = labels.long()
         self.data = data.float() / 255
-        
+        self.data = self.data * 2 - 1
     
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, index):
-        return self.data[index].flatten(), self.labels[index]
+        return self.data[index].flatten()
     
