@@ -4,62 +4,51 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
+class ResidualBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+
+        self.block = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=5, stride=1, padding=2),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(),
+            nn.Conv2d(out_channels, out_channels, kernel_size=5, stride=1, padding=2),
+            nn.BatchNorm2d(out_channels)
+        )
+    
+    def forward(self, x):
+        y = self.block(x)
+        if self.in_channels != self.out_channels:
+            x = nn.Conv2d(self.in_channels, self.out_channels, kernel_size=1, stride=1)(x)
+        
+        return x + y
+
 class Model(nn.Module):
     def __init__(self, dimensions, time_steps, beta_start, beta_end):
         super().__init__()
 
+        ## for the neural network
         self.dimensions = dimensions
         self.img_size = torch.tensor(dimensions).prod()
         self.time_dim = dimensions[1] * dimensions[2]
 
-        self.downsample = nn.Sequential(
-            nn.Unflatten(1, (2, 28, 28)),
-            nn.Conv2d(2, 16, kernel_size=5, stride=1, padding=2), 
-            nn.BatchNorm2d(16),
-            nn.Dropout2d(0.2),
-            nn.LeakyReLU(),
-            nn.Conv2d(16, 32, kernel_size=5, stride=1, padding=2),
-            nn.BatchNorm2d(32),
-            nn.Dropout2d(0.2),
-            nn.LeakyReLU(),
-            nn.MaxPool2d(2),
-            nn.Conv2d(32, 64, kernel_size=5, stride=1, padding=2),
-            nn.BatchNorm2d(64),
-            nn.Dropout2d(0.2),
-            nn.LeakyReLU(),
-            nn.MaxPool2d(2),
+        self.block_channels = [2 for _ in range(20)]
+
+        self.in_dimensions = self.dimensions.copy()
+        self.in_dimensions[0] += 1
+
+        self.RESblocks = nn.Sequential(
+            nn.Unflatten(1, self.in_dimensions),
+            *[ResidualBlock(self.block_channels[i], self.block_channels[i + 1]) for i in range(len(self.block_channels) - 1)],
             nn.Flatten(),
-            nn.Linear(7 * 7 * 64, 512),
-            nn.LeakyReLU(),
+            nn.Linear(self.block_channels[-1] * self.img_size, self.img_size),
         )
 
-        self.upsample = nn.Sequential(
-            nn.Linear(512, 7 * 7 * 64),
-            nn.LeakyReLU(),
-            nn.Unflatten(1, (64, 7, 7)),
-            nn.ConvTranspose2d(64, 32, kernel_size=5, stride=2, padding=2, output_padding=1),
-            nn.BatchNorm2d(32),
-            nn.Dropout2d(0.2),
-            nn.LeakyReLU(),
-            nn.ConvTranspose2d(32, 16, kernel_size=5, stride=2, padding=2, output_padding=1),
-            nn.BatchNorm2d(16),
-            nn.Dropout2d(0.2),
-            nn.LeakyReLU(),
-            nn.ConvTranspose2d(16, 16, kernel_size=5, stride=1, padding=2),  
-            nn.BatchNorm2d(16),
-            nn.Dropout2d(0.2),
-            nn.LeakyReLU(),
-            nn.ConvTranspose2d(16, 8, kernel_size=5, stride=1, padding=2),
-            nn.BatchNorm2d(8),
-            nn.Dropout2d(0.2),
-            nn.LeakyReLU(),
-            nn.Flatten(),
-            nn.Linear(8 * 28 * 28, 1024),
-            nn.LeakyReLU(),
-            nn.Linear(1024, self.img_size),
-            nn.Tanh(),
-        )
 
+        ## for noise scheduling
         self.time_steps = time_steps
         self.beta_start = beta_start
         self.beta_end = beta_end
@@ -85,8 +74,8 @@ class Model(nn.Module):
 
     def forward(self, x, t):
         y = torch.cat((x, t), 1)
-        y = self.downsample(y)
-        y = self.upsample(y)
+        y = self.RESblocks(y)
+        y = F.tanh(y)
 
         return y
 
@@ -127,7 +116,7 @@ class Model(nn.Module):
         return x_t, eps
 
     def sample_time_steps(self, n):
-        return torch.randint(1, self.time_steps - 1, (n,))
+        return torch.randint(self.time_steps, (n,))
 
     def save_model(self, filename):
         torch.save(self.state_dict(), filename)
@@ -137,29 +126,38 @@ class Model(nn.Module):
         self.load_state_dict(torch.load(filename, map_location="cpu"))
         print("Model loaded!")
 
-    def get_prior_sample(self, x_t, t):
+    def get_prior_sample(self, x_t, t, type="noise"):
         t_enc = self.time_encoding(torch.tensor(t).view((1,)))
-        x_0 = self(x_t, t_enc)
-        k1 = self.sqrt_alpha[t] * self.one_minus_alpha_hat[t - 1] * x_t
-        k2 = self.sqrt_alpha_hat[t - 1] * (1 - self.alpha[t]) * x_0
-        x_t = (k1 + k2) / self.one_minus_alpha_hat[t]
+
+        if type == "noise":
+            k1 = 1 / self.sqrt_alpha[t]
+            k2 = (1 - self.alpha[t]) / self.sqrt_one_minus_alpha_hat[t]
+            eps = self(x_t, t_enc) 
+            x_t = k1 * (x_t - k2 * eps)
+        elif type == "x_0":
+            k1 = self.sqrt_alpha[t] * self.one_minus_alpha_hat[t]
+            k2 = self.sqrt_alpha_hat[t - 1] * (1 - self.alpha[t])
+            x_0 = self(x_t, t_enc)
+            x_t = (k1 * x_t + k2 * x_0) / self.one_minus_alpha_hat[t]
+
         if t > 1:
             x_t += torch.randn_like(x_t) * self.sigma[t]
 
         return x_t
 
-    def sample_image(self, x_T = None):
+    def sample_image(self, x_T = None, type="noise"):
         x_t = torch.randn((1, self.img_size)) if x_T == None else x_T
         for t in reversed(range(1, self.time_steps)):
-            x_t = self.get_prior_sample(x_t, t)
+            x_t = self.get_prior_sample(x_t, t, type)
 
         x_t = x_t * 0.5 + 0.5
         x_t = torch.clamp(x_t, 0, 1)
         return x_t.detach()
 
-    def sample_and_show_image(self, title=""):
-        x_t = self.sample_image()
+    def sample_and_show_image(self, x_T = None, type="noise", title=""):
+        x_t = self.sample_image(x_T, type)
         plt.imshow(x_t.view(*self.dimensions).permute(1, 2, 0), cmap="gray")
         plt.title(title)
         plt.axis("off")
         plt.show()
+

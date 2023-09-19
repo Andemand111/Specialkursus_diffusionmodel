@@ -11,10 +11,4 @@ dataloader = DataLoader(dataset,
 args = [dataset.dimensions, 1000, 0.0001, 0.02]
 model = Model(*args)
 filename = "diffusion_model"
-
-try:
-    model.load_model(filename)
-except:
-    pass
-
 model.train(30, dataloader, filename)
