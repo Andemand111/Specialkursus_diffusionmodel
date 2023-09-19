@@ -6,25 +6,24 @@ from tqdm import tqdm
 
 class ResidualBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
-        super().__init__()
-        
+        super(ResidualBlock, self).__init__()
+
         self.in_channels = in_channels
         self.out_channels = out_channels
 
-        self.block = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=5, stride=1, padding=2),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(),
-            nn.Conv2d(out_channels, out_channels, kernel_size=5, stride=1, padding=2),
-            nn.BatchNorm2d(out_channels)
-        )
-    
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
+        self.bn = nn.BatchNorm2d(out_channels)
+
     def forward(self, x):
-        y = self.block(x)
+        residual = x
+        out = F.relu(self.bn(self.conv1(x)))
+        out = self.bn(self.conv2(out))
         if self.in_channels != self.out_channels:
-            x = nn.Conv2d(self.in_channels, self.out_channels, kernel_size=1, stride=1)(x)
+            residual = nn.Conv2d(self.in_channels, self.out_channels, kernel_size=1)(residual)
         
-        return x + y
+        out += residual  # Residual connection
+        return out
 
 class Model(nn.Module):
     def __init__(self, dimensions, time_steps, beta_start, beta_end):
@@ -35,18 +34,28 @@ class Model(nn.Module):
         self.img_size = torch.tensor(dimensions).prod()
         self.time_dim = dimensions[1] * dimensions[2]
 
-        self.block_channels = [2 for _ in range(20)]
+        num_res_blocks = 2
+        in_channels = dimensions[0] + 1
+        out_channels = dimensions[0]
+        
+        # Encoder (Downsampling)
+        self.encoder = nn.ModuleList()
+        for _ in range(num_res_blocks):
+            self.encoder.append(ResidualBlock(in_channels, 64))
+            in_channels = 64  # Update input channels for the next block
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
 
-        self.in_dimensions = self.dimensions.copy()
-        self.in_dimensions[0] += 1
+        # Bottleneck (Bottom of the U-Net)
+        self.bottleneck = ResidualBlock(64, 64)
 
-        self.RESblocks = nn.Sequential(
-            nn.Unflatten(1, self.in_dimensions),
-            *[ResidualBlock(self.block_channels[i], self.block_channels[i + 1]) for i in range(len(self.block_channels) - 1)],
-            nn.Flatten(),
-            nn.Linear(self.block_channels[-1] * self.img_size, self.img_size),
-        )
+        # Decoder (Upsampling)
+        self.decoder = nn.ModuleList()
+        for _ in range(num_res_blocks):
+            self.decoder.append(ResidualBlock(64, 64))
 
+        # Final Convolution Layer (Output)
+        self.final_conv = nn.Conv2d(64, out_channels, kernel_size=1)
+        self.linear = nn.Linear(self.img_size, self.img_size)
 
         ## for noise scheduling
         self.time_steps = time_steps
@@ -73,11 +82,30 @@ class Model(nn.Module):
         return encodings
 
     def forward(self, x, t):
-        y = torch.cat((x, t), 1)
-        y = self.RESblocks(y)
-        y = F.tanh(y)
+        x = torch.cat((x, t), 1)
+        x = x.view(-1, self.dimensions[0] + 1, self.dimensions[1], self.dimensions[2])
 
-        return y
+        # Encoder
+        encoder_outputs = []
+        for block in self.encoder:
+            x = block(x)
+            encoder_outputs.append(x)
+            x = self.pool(x)
+
+        # Bottleneck
+        x = self.bottleneck(x)
+
+        # Decoder
+        for block, skip_connection in zip(self.decoder, reversed(encoder_outputs)):
+            x = F.interpolate(x, scale_factor=2, mode='bilinear', align_corners=False)
+            x = block(x + skip_connection)
+
+        # Final Convolution
+        x = self.final_conv(x)
+        x = x.view(-1, self.img_size)
+        x = self.linear(x)
+
+        return x
 
     def train(self, epochs, dataloader, filename="diffusion_model"):
         optimizer = torch.optim.Adam(self.parameters())
@@ -92,7 +120,7 @@ class Model(nn.Module):
                 x_t, eps = self.make_noisy_image(x_0, ts)
                 time_encodings = self.time_encoding(ts)
                 pred = self(x_t, time_encodings)
-                loss = cost(pred, x_0)
+                loss = cost(pred, eps)
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -104,7 +132,7 @@ class Model(nn.Module):
             print("loss: ", losses.mean().item())
             self.save_model(filename)
 
-            self.sample_and_show_image(f"Result after epoch: {epoch}")
+            self.sample_and_show_image(title=f"Result after epoch: {epoch}")
 
     def make_noisy_image(self, x_0, t):
         t = t.view(-1, 1)
@@ -134,6 +162,7 @@ class Model(nn.Module):
             k2 = (1 - self.alpha[t]) / self.sqrt_one_minus_alpha_hat[t]
             eps = self(x_t, t_enc) 
             x_t = k1 * (x_t - k2 * eps)
+
         elif type == "x_0":
             k1 = self.sqrt_alpha[t] * self.one_minus_alpha_hat[t]
             k2 = self.sqrt_alpha_hat[t - 1] * (1 - self.alpha[t])
@@ -160,4 +189,3 @@ class Model(nn.Module):
         plt.title(title)
         plt.axis("off")
         plt.show()
-
