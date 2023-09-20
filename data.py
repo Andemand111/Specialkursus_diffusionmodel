@@ -17,6 +17,7 @@ class Faces(Dataset):
         return convert_tensor(t)
 
     def __len__(self):
+        return 10_000
         return 202599
     
     def __getitem__(self, index):
@@ -26,6 +27,7 @@ class Faces(Dataset):
         img = Image.open(self.path + f'{n}.jpg')
         img  = self.convert_tensor(img)
         img = transforms.Resize(self.dimensions[1:], antialias=None)(img).flatten()
+        img = img * 2 - 1
         return img
 
 class MNIST(Dataset):
@@ -38,8 +40,7 @@ class MNIST(Dataset):
         self.data = self.data
     
     def __len__(self):
-        #return len(self.data)
-        return 6000
+        return len(self.data)
     
     def __getitem__(self, index):
         return self.data[index] * 2 - 1
@@ -62,6 +63,7 @@ class Cifar10(Dataset):
         self.data = self.data * 2 - 1
     
     def __len__(self):
+        return 10_000
         return len(self.data)
 
     def __getitem__(self, index):

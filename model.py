@@ -3,10 +3,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-from modules import ResUnet
+from modules import ResidualConv, Upsample
 
 class Model(nn.Module):
-    def __init__(self, dimensions, time_steps, beta_start, beta_end):
+    def __init__(self, dimensions, channels = 3, filters=[64, 128, 256, 512]):
         super().__init__()
 
         ## for the neural network
@@ -17,14 +17,40 @@ class Model(nn.Module):
         self.img_size = torch.tensor(dimensions).prod()
         self.time_dim = dimensions[1] * dimensions[2]
         
-        self.network = ResUnet(dimensions[0] + 1, dimensions[0])
+        self.input_layer = nn.Sequential(
+            nn.Conv2d(channels + 1, filters[0], kernel_size=3, padding=1),
+            nn.BatchNorm2d(filters[0]),
+            nn.ReLU(),
+            nn.Conv2d(filters[0], filters[0], kernel_size=3, padding=1),
+        )
+        self.input_skip = nn.Sequential(
+            nn.Conv2d(channels + 1, filters[0], kernel_size=3, padding=1)
+        )
+
+        self.residual_conv_1 = ResidualConv(filters[0], filters[1], 2, 1)
+        self.residual_conv_2 = ResidualConv(filters[1], filters[2], 2, 1)
+
+        self.bridge = ResidualConv(filters[2], filters[3], 2, 1)
+
+        self.upsample_1 = Upsample(filters[3], filters[3], 2, 2)
+        self.up_residual_conv1 = ResidualConv(filters[3] + filters[2], filters[2], 1, 1)
+
+        self.upsample_2 = Upsample(filters[2], filters[2], 2, 2)
+        self.up_residual_conv2 = ResidualConv(filters[2] + filters[1], filters[1], 1, 1)
+
+        self.upsample_3 = Upsample(filters[1], filters[1], 2, 2)
+        self.up_residual_conv3 = ResidualConv(filters[1] + filters[0], filters[0], 1, 1)
+
+        self.final_conv = nn.Sequential(
+            nn.Conv2d(filters[0], channels, kernel_size=3, padding=1),
+        )
 
         ## for noise scheduling
-        self.time_steps = time_steps
-        self.beta_start = beta_start
-        self.beta_end = beta_end
+        self.time_steps = 1000
+        self.beta_start = 1e-4
+        self.beta_end = 0.02
 
-        self.beta = torch.linspace(beta_start, beta_end, time_steps)
+        self.beta = torch.linspace(self.beta_start, self.beta_end, self.time_steps)
         self.alpha = 1 - self.beta
         self.alpha_hat = torch.cumprod(self.alpha, dim=0)
         self.sqrt_alpha = torch.sqrt(self.alpha)
@@ -46,9 +72,33 @@ class Model(nn.Module):
     def forward(self, x, t):
         x = torch.cat((x, t), dim=1)
         x = x.view(-1, *self.new_dimension)
-        x = self.network(x)
-        x = x.view(-1, self.img_size)
-        return x
+
+        # Encode
+        x1 = self.input_layer(x) + self.input_skip(x)
+        x2 = self.residual_conv_1(x1)
+        x3 = self.residual_conv_2(x2)
+        # Bridge
+        x4 = self.bridge(x3)
+        # Decode
+        x4 = self.upsample_1(x4)
+        x5 = torch.cat([x4, x3], dim=1)
+
+        x6 = self.up_residual_conv1(x5)
+
+        x6 = self.upsample_2(x6)
+        x7 = torch.cat([x6, x2], dim=1)
+
+        x8 = self.up_residual_conv2(x7)
+
+        x8 = self.upsample_3(x8)
+        x9 = torch.cat([x8, x1], dim=1)
+
+        x10 = self.up_residual_conv3(x9)
+
+        x11 = self.final_conv(x10)
+
+        x12 = x11.view(-1, self.img_size)
+        return x12
 
 
     def train(self, epochs, dataloader, filename="diffusion_model"):
@@ -104,8 +154,7 @@ class Model(nn.Module):
 
             k1 = 1 / self.sqrt_alpha[t]
             k2 = (1 - self.alpha[t]) / self.sqrt_one_minus_alpha_hat[t]
-            eps = self(x_t, t_enc) 
-            x_t = k1 * (x_t - k2 * eps)
+            x_t = k1 * (x_t - k2 * self(x_t, t_enc))
 
             if t > 1:
                 x_t += torch.randn_like(x_t) * self.sigma[t]
@@ -128,7 +177,7 @@ class Model(nn.Module):
         plt.axis("off")
         plt.show()
 
-model = Model([3, 64, 64], 1000, 0.0001, 0.02)
+model = Model([3, 64, 64], channels=3)
 dummy_input = torch.randn(2, 3 * 64 * 64)
 dummy_time = model.sample_time_steps(2)
 dummy_time_enc = model.time_encoding(dummy_time)
