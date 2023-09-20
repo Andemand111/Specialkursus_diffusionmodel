@@ -15,7 +15,7 @@ trainset = trainset.data[:1000]
 #%%
 # Define the noising schedule.
 time_steps = 1000
-beta_start = 0.001
+beta_start = 0.0001
 beta_end = 0.02
 
 beta = torch.linspace(beta_start, beta_end, time_steps)
@@ -67,7 +67,6 @@ print(q_mu[-5:],q_std[-5:],p_mu[-5:],p_std[-5:])
 def make_noisy_image(x, t):
         eps = torch.randn(x.shape)
         x_t = sqrt_alpha_hat[t] * x + sqrt_one_minus_alpha_hat[t] * eps
-        
         return x_t, eps
 
 
@@ -92,7 +91,7 @@ for i in range(1000):
 #%%
 # Plot the KL divergence between the noisy distribution and the prior. With beta range [0.001, 0.02].
 plt.plot(KL_list)
-plt.title("KL divergence between noisy distribution and prior, \n with beta range [0.001, 0.02] and t = 1000")
+plt.title("KL divergence between noisy distribution and prior, \n with beta range [0.0001, 0.02] and t = 1000")
 plt.xlabel("t")
 plt.ylabel("KL divergence")
 plt.show()

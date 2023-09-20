@@ -1,3 +1,4 @@
+#%%
 from model import Model
 import torch
 from tqdm import tqdm

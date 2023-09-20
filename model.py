@@ -204,3 +204,5 @@ class Model(nn.Module):
         plt.title(title)
         plt.axis("off")
         plt.show()
+
+model = Model((3, 64, 64), 1000, 0.0001, 0.02)
