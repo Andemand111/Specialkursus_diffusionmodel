@@ -10,14 +10,14 @@ class Faces(Dataset):
     def __init__(self):
         super().__init__()
         self.path = "G:/Mit drev/Uni/5. semester/specialkursus/celeba/img_align_celeba/img_align_celeba/"
-        self.dimensions = [3, 64, 64]
+        self.dimensions = [3, 32, 32]
 
     def convert_tensor(self, t):
         convert_tensor = transforms.ToTensor()
         return convert_tensor(t)
 
     def __len__(self):
-        return 10_000
+        return 20_000
         return 202599
     
     def __getitem__(self, index):

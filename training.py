@@ -8,7 +8,6 @@ dataloader = DataLoader(dataset,
                         shuffle=True, 
                         drop_last=True)
 
-args = [dataset.dimensions, 3]
-model = Model(*args)
+model = Model(dataset.dimensions, channels=3, time_steps=200)
 filename = "diffusion_model"
 model.train(30, dataloader, filename)
