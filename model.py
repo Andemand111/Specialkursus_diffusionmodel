@@ -5,6 +5,24 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 
+class SelfAttention(nn.Module):
+    def __init__(self, channels, size):
+        super(SelfAttention, self).__init__()
+        self.channels = channels
+        self.size = size
+        self.mha = nn.MultiheadAttention(channels, 4, batch_first=True)
+        self.ln = nn.LayerNorm([channels])
+        self.ff_self = nn.Sequential(
+            nn.LayerNorm([channels]),
+            nn.Linear(channels, channels),
+            nn.GELU(),
+            nn.Linear(channels, channels),
+        )
+
+
+
+
+
 class Model(nn.Module):
     def __init__(self, dimensions, time_steps, beta_start, beta_end):
         super().__init__()

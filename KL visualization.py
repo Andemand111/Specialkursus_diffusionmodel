@@ -93,7 +93,7 @@ for i in range(1000):
 plt.plot(KL_list)
 plt.title("KL divergence between noisy distribution and prior, \n with beta range [0.0001, 0.02] and t = 1000")
 plt.xlabel("t")
-plt.ylabel("KL divergence")
+plt.ylabel(r"$D_{KL}(q(x_T|x_0)||p(x_T))$")
 plt.show()
 
 
