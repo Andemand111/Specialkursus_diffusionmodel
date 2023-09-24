@@ -7,9 +7,6 @@ import torch.nn as nn
     Det er omkring "x3" den går gal. Når den skal concatenates med x i decoderen.
 """
 
-
-
-
 # Double convolution block
 
 class DoubleConv(nn.Module):
