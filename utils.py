@@ -1,5 +1,7 @@
 import torch
 import torch.nn as nn
+from torch.utils.data import Dataset
+import torchvision
 
 class NoiseSchedule:
     def __init__(self, beta_start, beta_end, time_steps):
@@ -40,12 +42,12 @@ class Block(nn.Module):
             nn.Linear(time_emb_dim, out_ch)
         )
         if up:
-            self.conv1 = nn.Conv2d(2*in_ch, out_ch, 5, padding=2)
-            self.transform = nn.ConvTranspose2d(out_ch, out_ch, 5, padding=2)
+            self.conv1 = nn.Conv2d(2*in_ch, out_ch, 3, padding=1)
+            self.transform = nn.ConvTranspose2d(out_ch, out_ch, 3, padding=1)
         else:
-            self.conv1 = nn.Conv2d(in_ch, out_ch, 5, padding=2)
-            self.transform = nn.Conv2d(out_ch, out_ch, 5, padding=2)
-        self.conv2 = nn.Conv2d(out_ch, out_ch, 5, padding=2)
+            self.conv1 = nn.Conv2d(in_ch, out_ch, 3, padding=1)
+            self.transform = nn.Conv2d(out_ch, out_ch, 3, padding=1)
+        self.conv2 = nn.Conv2d(out_ch, out_ch, 3, padding=1)
         self.bnorm1 = nn.BatchNorm2d(out_ch)
         self.bnorm2 = nn.BatchNorm2d(out_ch)
         self.relu  = nn.ReLU()
@@ -70,7 +72,7 @@ class ResNET(nn.Module):
                 nn.ReLU()
             )
         
-        self.conv0 = nn.Conv2d(channels, down_channels[0], 7, padding=3)
+        self.conv0 = nn.Conv2d(channels, down_channels[0], 3, padding=1)
 
         self.downs = nn.ModuleList([Block(down_channels[i], down_channels[i+1], \
                                     time_emb_dim) \
@@ -99,4 +101,13 @@ class ResNET(nn.Module):
         out = self.output(x)
 
         return out
+    
+    def save_model(self, path):
+        torch.save(self.state_dict(), path)
+        print("Model saved to {}".format(path))
+
+    def load_model(self, path):
+        self.load_state_dict(torch.load(path))
+        print("Model loaded from {}".format(path))
+
 
