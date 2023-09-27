@@ -170,7 +170,7 @@ class SimpleModel(nn.Module):
         self.dimensions = dimensions
         self.img_size = torch.prod(torch.tensor(dimensions))
         self.device = device
-        self.path = "models/simple_model.pt"
+        self.path = "..models/simple_model.pt"
     
     def loss(self, x0):
         ts = self.noise_schedule.sample_time_steps(self.train_loader.batch_size)
@@ -232,7 +232,7 @@ class MuModel(nn.Module):
         self.dimensions = dimensions
         self.img_size = torch.prod(torch.tensor(dimensions))
         self.device = device
-        self.path = "models/mu_model.pt"
+        self.path = "..models/mu_model.pt"
     
     def loss(self, x0):
         ts = self.noise_schedule.sample_time_steps(self.train_loader.batch_size)
