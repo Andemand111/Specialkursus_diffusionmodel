@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
 import torchvision
+import torch.nn.functional as F
 import torchvision.transforms as transforms
 from tqdm import tqdm
 
@@ -75,11 +76,10 @@ class Block(nn.Module):
         return self.transform(h)
 
 class ResNET(nn.Module):
-    def  __init__(self, channels=3, time_emb_dim=64):
+    def  __init__(self, channels=3, time_emb_dim=64, down_channels = [64, 128, 256, 512, 1024]):
         super().__init__()
 
-        down_channels = (64, 128, 256, 512, 1024)
-        up_channels = (1024, 512, 256, 128, 64)
+        up_channels = down_channels[::-1]
 
         self.time_mlp = nn.Sequential(
                 nn.Linear(time_emb_dim, time_emb_dim),
@@ -170,7 +170,7 @@ class SimpleModel(nn.Module):
         self.dimensions = dimensions
         self.img_size = torch.prod(torch.tensor(dimensions))
         self.device = device
-        self.path = "..models/simple_model.pt"
+        self.path = "../models/simple_model.pt"
     
     def loss(self, x0):
         ts = self.noise_schedule.sample_time_steps(self.train_loader.batch_size)
@@ -232,21 +232,20 @@ class MuModel(nn.Module):
         self.dimensions = dimensions
         self.img_size = torch.prod(torch.tensor(dimensions))
         self.device = device
-        self.path = "..models/mu_model.pt"
+        self.path = "../models/mu_model.pt"
     
     def loss(self, x0):
         ts = self.noise_schedule.sample_time_steps(self.train_loader.batch_size)
         embeddings = SinusoidalEmbeddings(ts)
-        xt, eps, mu = self.noise_schedule.make_noisy_images(x0.flatten(1), ts)
+        xt, _, _ = self.noise_schedule.make_noisy_images(x0.flatten(1), ts)
         xt = xt.view(self.train_loader.batch_size, *self.dimensions)
 
         xt = xt.to(self.device)
         embeddings = embeddings.to(self.device)
-        eps = eps.to(self.device)
-        mu = mu.to(self.device)
+        x0 = x0.to(self.device)
 
         pred = self.network(xt, embeddings)
-        loss = mse(pred.flatten(1), mu)
+        loss = mse(pred.flatten(1), x0.flatten(1))
         return loss
     
     def sample(self):
@@ -260,7 +259,10 @@ class MuModel(nn.Module):
                 xt = xt.to(self.device)
                 embedding = embedding.to(self.device)
 
-                xt = self.network(xt.view(1, *self.dimensions), embedding).flatten(1)
+                x0 = self.network(xt.view(1, *self.dimensions), embedding).flatten(1)
+                k1 = self.noise_schedule.sqrt_alpha[t] * (1 - self.noise_schedule.alpha_hat[t - 1]) * xt
+                k2 = self.noise_schedule.sqrt_alpha_hat[t - 1] * (1 - self.noise_schedule.alpha[t]) * x0
+                xt = (k1 + k2) / (1 - self.noise_schedule.alpha_hat[t])
 
                 if t > 1:
                     xt += self.noise_schedule.sigma[t].to(self.device) * torch.randn((1, self.img_size)).to(self.device)
