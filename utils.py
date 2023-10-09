@@ -53,7 +53,7 @@ class Block(nn.Module):
         super().__init__()
         self.time_linear = nn.Sequential(nn.Linear(time_emb_dim, time_emb_dim),
                                             nn.ReLU(),
-                                            nn.Dropout(0.2),
+                                            nn.Dropout(0.1),
                                             nn.Linear(time_emb_dim, out_ch))
 
         if up:
@@ -67,7 +67,7 @@ class Block(nn.Module):
         self.bnorm1 = nn.BatchNorm2d(out_ch)
         self.bnorm2 = nn.BatchNorm2d(out_ch)
         self.relu  = nn.ReLU()
-        self.dropout = nn.Dropout(0.2)
+        self.dropout = nn.Dropout(0.1)
         
     def forward(self, x, t, ):
         h = self.bnorm1(self.relu(self.conv1(x)))
@@ -87,7 +87,7 @@ class ResNET(nn.Module):
 
         self.time_linear = nn.Sequential(nn.Linear(time_emb_dim, time_emb_dim),
                                             nn.ReLU(),
-                                            nn.Dropout(0.2),
+                                            nn.Dropout(0.1),
                                             nn.Linear(time_emb_dim, time_emb_dim))
         
         self.conv0 = nn.Conv2d(channels, down_channels[0], 3, padding=1)
@@ -159,6 +159,44 @@ class CIFAR10(Dataset):
     def __getitem__(self, idx):
         return self.data[idx]
     
+class CelebA(Dataset):
+    def __init__(self, n = None):
+        super().__init__()
+
+        data = torchvision.datasets.CelebA(root='../data', download=True, transform=transforms.ToTensor())
+        data = torch.stack(data.data)
+        data = data.permute(0,3,1,2).float() / 255
+        self.data = data * 2 - 1
+        self.n = n
+
+    def __len__(self):
+        if self.n is None:
+            return len(self.data)
+        
+        return self.n
+    
+    def __getitem__(self, idx):
+        return self.data[idx]
+
+class StanfordCars(Dataset):
+    def __init__(self, n = None):
+        super().__init__()
+
+        data = torchvision.datasets.StanfordCars(root='../data', download=True, transform=transforms.ToTensor())
+        data = torch.stack(data.data)
+        data = data.permute(0,3,1,2).float() / 255
+        self.data = data * 2 - 1
+        self.n = n
+
+    def __len__(self):
+        if self.n is None:
+            return len(self.data)
+        
+        return self.n
+    
+    def __getitem__(self, idx):
+        return self.data[idx]
+    
 class Model(nn.Module):
     def __init__(self, network, noise_schedule, dimensions, device):
         super().__init__()
@@ -205,8 +243,10 @@ class SimpleModel(Model):
     
     def loss(self, x0):
         batch_size = len(x0)
+
         ts = self.noise_schedule.sample_time_steps(batch_size)
         embeddings = SinusoidalEmbeddings(ts)
+
         xt, eps, _ = self.noise_schedule.make_noisy_images(x0.flatten(1), ts)
         xt = xt.view(batch_size, *self.dimensions)
 
@@ -261,29 +301,20 @@ class MuModel(Model):
             xt += self.noise_schedule.sigma[t].to(self.device) * torch.randn((1, self.img_size)).to(self.device)
 
         return xt
-        
-    def save_model(self):
-        torch.save(self.state_dict(), self.path)
-        print("Model saved to {}".format(self.path))
-    
-    def load_model(self):
-        try:
-            self.load_state_dict(torch.load(self.path))
-            print("Model loaded from {}".format(self.path))
-        except:
-            print("Failed to load model from {}".format(self.path))
-            print("Initializing new model")
 
+
+""" n = 4
 noise_schedule = NoiseSchedule(1e-4, 0.02, 1000)
-dimensions = [3, 32, 32]
+dimensions = [1, 28, 28]
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-network = ResNET()
-model = MuModel(network, noise_schedule, dimensions, device)
-dummy_input = torch.randn(1, 3, 32, 32).to(device)
-dummy_time = torch.randn(1, 1)
+network = ResNET(channels=dimensions[0])
+model = SimpleModel(network, noise_schedule, dimensions, device)
+dummy_input = torch.randn(n, *dimensions).to(device)
+dummy_time = noise_schedule.sample_time_steps(n)
 dummy_embedding = SinusoidalEmbeddings(dummy_time).to(device)
 dummy_out = model.network(dummy_input, dummy_embedding)
 num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-# print("Number of parameters: {}".format(num_params))
-# print(dummy_out.shape)
-# xt = model.sample()W
+print("Number of parameters: {}".format(num_params))
+print(dummy_out.shape)
+xt = model.sample() """
+
