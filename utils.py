@@ -206,11 +206,12 @@ class Model(nn.Module):
         self.img_size = torch.prod(torch.tensor(dimensions))
         self.device = device
     
-    def sample(self):
+    def sample(self, xt=None, T=None):
         with torch.no_grad():
-            xt = torch.randn((1, self.img_size))
+            xt = torch.randn((1, self.img_size)) if xt is None else xt
+            T = self.noise_schedule.time_steps if T is None else T
             print("Sampling image..")
-            for t in tqdm(reversed(range(1, self.noise_schedule.time_steps)), total=self.noise_schedule.time_steps-1):
+            for t in tqdm(reversed(range(1, T)), total = T - 1):
                 torch.cuda.empty_cache() ## clear memory, otherwise it will crash due to the "big" loop
                 embedding = SinusoidalEmbeddings(torch.tensor(t).view(1,1))
                 
