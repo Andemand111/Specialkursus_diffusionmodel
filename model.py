@@ -37,16 +37,9 @@ class conv_block(nn.Module):
         t = self.time_lin(t)
         t = t.view(-1, t.shape[1], 1, 1)
 
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu1(x)
-        x = self.dropout(x)
-
+        x = self.bn1(self.relu(self.conv1(x)))
         x = x + t
-
-        x = self.conv2(x)
-        x = self.bn2(x)
-        x = self.relu2(x)
+        x = self.bn2(self.relu(self.conv2(x)))
         x = self.dropout(x)
         
         return x
@@ -57,8 +50,8 @@ class up_conv(nn.Module):
         self.up = nn.Sequential(
             nn.Upsample(scale_factor=2),
             nn.Conv2d(ch_in,ch_out,kernel_size=3,stride=1,padding=1,bias=True),
+            nn.ReLU(inplace=True),
 		    nn.BatchNorm2d(ch_out),
-			nn.ReLU(inplace=True),
             nn.Dropout2d(p=0.1)
         )
 
@@ -73,7 +66,7 @@ class single_conv(nn.Module):
         self.conv = nn.Sequential(
             nn.Conv2d(ch_in, ch_out, kernel_size=3,stride=1,padding=1,bias=True),
             nn.BatchNorm2d(ch_out),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.Dropout2d(p=0.1)
         )
 
@@ -166,7 +159,6 @@ class AttU_Net(nn.Module):
         x5 = self.Maxpool(x4)
         x5 = self.Conv5(x5, t)
 
-        # decoding + concat path
         d5 = self.Up5(x5)
 
         x4 = self.Att5(g=d5,x=x4)
