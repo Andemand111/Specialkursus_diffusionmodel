@@ -33,8 +33,11 @@ class NoiseSchedule:
         self.sqrt_alpha_hat = torch.sqrt(self.alpha_hat)
         self.one_minus_alpha_hat = 1 - self.alpha_hat
         self.sqrt_one_minus_alpha_hat = torch.sqrt(self.one_minus_alpha_hat)
-        self.sigma_sq = (1 - self.alpha) * torch.roll(self.one_minus_alpha_hat, 1) / self.one_minus_alpha_hat
+        """ self.sigma_sq = (1 - self.alpha) * torch.roll(self.one_minus_alpha_hat, 1) / self.one_minus_alpha_hat
         self.sigma_sq[0] = 0
+        self.sigma = torch.sqrt(self.sigma_sq) """
+
+        self.sigma_sq = self.beta
         self.sigma = torch.sqrt(self.sigma_sq)
 
     def sample_time_steps(self, n):
@@ -206,12 +209,15 @@ class Model(nn.Module):
         self.img_size = torch.prod(torch.tensor(dimensions))
         self.device = device
     
-    def sample(self, xt=None, T=None):
+    def sample(self, xt=None, T=None, show_progress=True):
+        steps = torch.linspace(0, self.noise_schedule.time_steps, 10, dtype=torch.int)
+        progress_list = []
+
         with torch.no_grad():
             xt = torch.randn((1, self.img_size)) if xt is None else xt
             T = self.noise_schedule.time_steps if T is None else T
             print("Sampling image..")
-            for t in tqdm(reversed(range(1, T)), total = T - 1):
+            for t in tqdm(reversed(range(0, T)), total = T - 1):
                 torch.cuda.empty_cache() ## clear memory, otherwise it will crash due to the "big" loop
                 embedding = SinusoidalEmbeddings(torch.tensor(t).view(1,1))
                 
@@ -219,10 +225,12 @@ class Model(nn.Module):
                 embedding = embedding.to(self.device)
 
                 xt = self.get_prior(xt, embedding, t)
+                if t in steps:
+                    progress_list.append(xt.view(*self.dimensions).cpu())
 
             print("Done sampling image")
 
-            return xt
+            return xt, progress_list
         
     def save_model(self):
         torch.save(self.state_dict(), self.path)
@@ -242,10 +250,10 @@ class SimpleModel(Model):
         super().__init__(network, noise_schedule, dimensions, device)
         self.path = "../models/simple_model.pt"
     
-    def loss(self, x0):
+    def loss(self, x0, ts= None):
         batch_size = len(x0)
 
-        ts = self.noise_schedule.sample_time_steps(batch_size)
+        ts = self.noise_schedule.sample_time_steps(batch_size) if ts is None else ts
         embeddings = SinusoidalEmbeddings(ts)
 
         xt, eps, _ = self.noise_schedule.make_noisy_images(x0.flatten(1), ts)
@@ -266,7 +274,7 @@ class SimpleModel(Model):
         k2 = (1 - self.noise_schedule.alpha[t]) / self.noise_schedule.sqrt_one_minus_alpha_hat[t]
 
         xt = k1 * (xt - k2 * eps)
-        if t > 1:
+        if t > 0:
             xt += self.noise_schedule.sigma[t].to(self.device) * torch.randn((1, self.img_size)).to(self.device)
         
         return xt
@@ -298,10 +306,62 @@ class MuModel(Model):
         k2 = self.noise_schedule.sqrt_alpha_hat[t - 1] * (1 - self.noise_schedule.alpha[t]) * x0
         xt = (k1 + k2) / (1 - self.noise_schedule.alpha_hat[t])
 
-        if t > 1:
+        if t > 0:
             xt += self.noise_schedule.sigma[t].to(self.device) * torch.randn((1, self.img_size)).to(self.device)
 
         return xt
+    
+class ELBOModel(Model):
+    def __init__(self, network, noise_schedule, dimensions, device):
+        super().__init__(network, noise_schedule, dimensions, device)
+        self.path = "../models/elbo_model.pt"
+    
+    def loss(self, x0):
+        ts = torch.arange(0, self.noise_schedule.time_steps).view(-1,1)
+        embeddings = SinusoidalEmbeddings(ts)
+        xts, _, _ = self.noise_schedule.make_noisy_images(x0.flatten(1).repeat(len(ts), 1), ts)
+
+        reconstruction_loss = self.reconstruction_loss(x0, xts[1])
+        kl_loss = self.kl_loss(xts, embeddings)
+
+        loss = reconstruction_loss + kl_loss
+
+        return loss
+
+    def kl_loss(self, xts, embeddings):
+        kl_loss = 0
+
+        for t in range(1, self.noise_schedule.time_steps):
+            constant = 1 / (2 * self.noise_schedule.beta[t])
+
+            xt_plus_one = xts[t + 1].view(1, *self.dimensions).to(self.device)
+            embedding = embeddings[t + 1].view(1, -1).to(self.device)
+
+            xt_minus_one = xts[t - 1].view(1, *self.dimensions)
+
+            mu_pred = self.network(xt_plus_one, embedding)
+            mu_real = self.noise_schedule.sqrt_alpha[t] * xt_minus_one
+
+            kl_loss += constant * mse(mu_pred.flatten(1), mu_real.flatten(1))
+        
+        return kl_loss
+
+    def reconstruction_loss(self, x0, x1):
+        constant = 1 / (2 * self.noise_schedule.beta[0])
+        embedding = SinusoidalEmbeddings(torch.tensor(1).view(1,1))
+        embedding = embedding.to(self.device)
+        x0 = x0.to(self.device)
+        x1 = x1.to(self.device)
+
+        mu_pred = self.network(x0, embedding)
+        loss = constant * mse(mu_pred.flatten(1), x1.flatten(1))
+        return loss
+    
+    def get_prior(self, xt, embedding, t):
+        xt = self.network(xt.view(1, *self.dimensions), embedding).flatten(1)
+
+        if t > 0:
+            xt += self.noise_schedule.beta[t] * torch.randn((1, self.img_size)).to(self.device)
 
 
 """ n = 4
