@@ -758,15 +758,15 @@ class UNetModel(nn.Module):
             result["up"].append(h.type(x.dtype))
         return result
 
+if __name__ == "__main__":
+    model = UNetModel(3, 32, 3, 6, [4], dropout=0.1, num_heads=1, num_heads_upsample=1)
+    dummy_input = th.randn(1, 3, 32, 32)
+    dummy_time = th.randn(1)
+    dummy_output = model(dummy_input, dummy_time)
+    print(dummy_output.shape)
 
-model = UNetModel(3, 32, 3, 6, [4], dropout=0.1, num_heads=1, num_heads_upsample=1)
-dummy_input = th.randn(1, 3, 32, 32)
-dummy_time = th.randn(1)
-dummy_output = model(dummy_input, dummy_time)
-print(dummy_output.shape)
+    ## number of parameters
+    num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Number of parameters: {num_params}")
 
-## number of parameters
-num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-print(f"Number of parameters: {num_params}")
-
-dummy_input = th.randn(64, 3, 32, 32)
+    dummy_input = th.randn(64, 3, 32, 32)

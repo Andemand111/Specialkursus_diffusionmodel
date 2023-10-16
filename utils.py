@@ -8,8 +8,9 @@ from tqdm import tqdm
 
 mse = nn.MSELoss()
 
+
 def SinusoidalEmbeddings(ts):
-    time_dimension = 64
+    time_dimension = 256
     half_dim =  time_dimension // 2
     embeddings = torch.log(torch.tensor(10000)) / (half_dim - 1)
     embeddings = torch.exp(torch.arange(half_dim).float() * -embeddings)
@@ -56,7 +57,6 @@ class Block(nn.Module):
         super().__init__()
         self.time_linear = nn.Sequential(nn.Linear(time_emb_dim, time_emb_dim),
                                             nn.ReLU(),
-                                            nn.Dropout(0.1),
                                             nn.Linear(time_emb_dim, out_ch))
 
         if up:
@@ -83,14 +83,13 @@ class Block(nn.Module):
 
 
 class ResNET(nn.Module):
-    def  __init__(self, channels=3, time_emb_dim=64, down_channels = [64, 128, 256, 512, 1024]):
+    def  __init__(self, channels=3, time_emb_dim=256, down_channels = [64, 128, 256, 512, 1024]):
         super().__init__()
 
         up_channels = down_channels[::-1]
 
         self.time_linear = nn.Sequential(nn.Linear(time_emb_dim, time_emb_dim),
                                             nn.ReLU(),
-                                            nn.Dropout(0.1),
                                             nn.Linear(time_emb_dim, time_emb_dim))
         
         self.conv0 = nn.Conv2d(channels, down_channels[0], 3, padding=1)
@@ -163,14 +162,31 @@ class CIFAR10(Dataset):
         return self.data[idx]
     
 class CelebA(Dataset):
-    def __init__(self, n = None):
+    def __init__(self, n = None, size=32):
         super().__init__()
 
-        data = torchvision.datasets.CelebA(root='../data', download=True, transform=transforms.ToTensor())
-        data = torch.stack(data.data)
-        data = data.permute(0,3,1,2).float() / 255
-        self.data = data * 2 - 1
         self.n = n
+
+        try:
+            self.data = torch.load(f"../data/celeba{size}.pt")
+        except:
+            print("Could not load celeba.pt, downloading data..")
+            transform = transforms.Compose([
+                transforms.CenterCrop(128),
+                transforms.Resize(size),
+                transforms.ToTensor(),
+            ])
+
+            self.images = torchvision.datasets.CelebA(root='../data', download=True, transform=transform)
+
+            num_images = 100_000
+            self.data = torch.zeros((num_images, 3, size, size))
+
+            print("Loading images into tensor..")
+            for i in tqdm(range(num_images)):
+                self.data[i] = self.images[i][0] * 2 - 1
+
+            torch.save(self.data, f"../data/celeba{size}.pt")
 
     def __len__(self):
         if self.n is None:
@@ -180,6 +196,7 @@ class CelebA(Dataset):
     
     def __getitem__(self, idx):
         return self.data[idx]
+
 
 class StanfordCars(Dataset):
     def __init__(self, n = None):
@@ -232,11 +249,17 @@ class Model(nn.Module):
 
             return xt, progress_list
         
-    def save_model(self):
+    def save_model(self, path= None):
+        if path is not None:
+            self.path = path
+
         torch.save(self.state_dict(), self.path)
         print("Model saved to {}".format(self.path))
     
-    def load_model(self):
+    def load_model(self, path= None):
+        if path is not None:
+            self.path = path
+            
         try:
             self.load_state_dict(torch.load(self.path))
             print("Model loaded from {}".format(self.path))
@@ -363,19 +386,20 @@ class ELBOModel(Model):
         if t > 0:
             xt += self.noise_schedule.beta[t] * torch.randn((1, self.img_size)).to(self.device)
 
+if __name__ == "__main__":
+    """ n = 4
+    noise_schedule = NoiseSchedule(1e-4, 0.02, 1000)
+    dimensions = [1, 28, 28]
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    network = ResNET(channels=dimensions[0])
+    model = SimpleModel(network, noise_schedule, dimensions, device)
+    dummy_input = torch.randn(n, *dimensions).to(device)
+    dummy_time = noise_schedule.sample_time_steps(n)
+    dummy_embedding = SinusoidalEmbeddings(dummy_time).to(device)
+    dummy_out = model.network(dummy_input, dummy_embedding)
+    num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print("Number of parameters: {}".format(num_params))
+    print(dummy_out.shape)
+    xt = model.sample() """
 
-""" n = 4
-noise_schedule = NoiseSchedule(1e-4, 0.02, 1000)
-dimensions = [1, 28, 28]
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-network = ResNET(channels=dimensions[0])
-model = SimpleModel(network, noise_schedule, dimensions, device)
-dummy_input = torch.randn(n, *dimensions).to(device)
-dummy_time = noise_schedule.sample_time_steps(n)
-dummy_embedding = SinusoidalEmbeddings(dummy_time).to(device)
-dummy_out = model.network(dummy_input, dummy_embedding)
-num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-print("Number of parameters: {}".format(num_params))
-print(dummy_out.shape)
-xt = model.sample() """
-
+    data = CelebA()
