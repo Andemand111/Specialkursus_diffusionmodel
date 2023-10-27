@@ -2,12 +2,14 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
 import torchvision
-import torch.nn.functional as F
 import torchvision.transforms as transforms
 from tqdm import tqdm
+from torch.utils.data import DataLoader
+from IPython.display import clear_output
+import matplotlib.pyplot as plt
+import numpy as np
 
 mse = nn.MSELoss()
-
 
 def SinusoidalEmbeddings(ts):
     time_dimension = 256
@@ -48,25 +50,6 @@ class NoiseSchedule:
         x_t = mu + std * eps
 
         return x_t, eps, mu
-
-class MNIST(Dataset):
-    def __init__(self, n = None):
-        super().__init__()
-
-        self.n = n
-        data = torchvision.datasets.MNIST(root='../data', download=True, transform=transforms.ToTensor())
-        data = data.data.float() / 255
-        data = data.view(-1, 1, 28, 28)
-        self.data = data * 2 - 1
-
-    def __len__(self):
-        if self.n is None:
-            return len(self.data)
-        
-        return self.n
-    
-    def __getitem__(self, idx):
-        return self.data[idx]
     
 class CIFAR10(Dataset):
     def __init__(self, n = None):
@@ -93,55 +76,23 @@ class CelebA(Dataset):
 
         self.n = n
 
-        try:
-            self.data = torch.load(f"../data/celeba{size}.pt")
-        except:
-            print("Could not load celeba.pt, downloading data..")
-            transform = transforms.Compose([
+        transform = transforms.Compose([
                 transforms.CenterCrop(128),
                 transforms.Resize(size),
                 transforms.ToTensor(),
             ])
 
-            self.images = torchvision.datasets.CelebA(root='../data', download=True, transform=transform)
-
-            num_images = 100_000
-            self.data = torch.zeros((num_images, 3, size, size))
-
-            print("Loading images into tensor..")
-            for i in tqdm(range(num_images)):
-                self.data[i] = self.images[i][0] * 2 - 1
-
-            torch.save(self.data, f"../data/celeba{size}.pt")
+        self.images = torchvision.datasets.CelebA(root='../data', download=True, transform=transform)
 
     def __len__(self):
         if self.n is None:
-            return len(self.data)
+            return len(self.images)
         
         return self.n
     
     def __getitem__(self, idx):
-        return self.data[idx]
-
-
-class StanfordCars(Dataset):
-    def __init__(self, n = None):
-        super().__init__()
-
-        data = torchvision.datasets.StanfordCars(root='../data', download=True, transform=transforms.ToTensor())
-        data = torch.stack(data.data)
-        data = data.permute(0,3,1,2).float() / 255
-        self.data = data * 2 - 1
-        self.n = n
-
-    def __len__(self):
-        if self.n is None:
-            return len(self.data)
-        
-        return self.n
+        return self.images[idx][0] * 2 - 1
     
-    def __getitem__(self, idx):
-        return self.data[idx]
     
 class Model(nn.Module):
     def __init__(self, network, noise_schedule, dimensions, device):
@@ -319,3 +270,138 @@ class ELBOModel(Model):
 
         if t > 0:
             xt += self.noise_schedule.beta[t] * torch.randn((1, self.img_size)).to(self.device)
+
+
+def test_model(model, dataset, batch_size = 64):
+    model.eval()
+    model.to(model.device)
+    test_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+    test_loss = 0
+    with torch.no_grad():
+        for x in test_loader:
+            loss = model.loss(x)
+            test_loss += loss.item()
+    test_loss /= len(test_loader)
+    return test_loss
+
+    
+def show_losses(losses, test_loss = None):
+    train_losses = losses[:, 0]
+    val_losses = losses[:, 1]
+    
+    if test_loss is not None:
+        plt.scatter(len(losses) - 1, test_loss, label="Test loss", color='r', marker='x', s=100)
+
+    plt.grid(True)
+    plt.title("Losses") 
+    plt.plot(train_losses, label="Train loss")
+    plt.plot(val_losses, label="Validation loss")
+    plt.xlabel("epoch")
+    plt.ylabel("loss")
+    plt.xticks(np.arange(0, len(losses)))
+    plt.legend()
+    plt.show()
+
+def training_loop(model, epochs, train_set, val_set, batch_size=64, save_params=False):
+    torch.autograd.set_detect_anomaly(True)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-5, weight_decay=1e-4)
+    epoch_loss = torch.zeros((epochs, 2))
+
+    num_paramters = sum(p.numel() for p in model.parameters() if p.requires_grad) 
+    parameters = torch.zeros((epochs, num_paramters)) if save_params else None
+
+    data_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, drop_last=True)
+
+    for epoch in range(epochs):
+        losses = torch.zeros(len(data_loader))
+
+        for i, x0 in enumerate(tqdm(data_loader)):
+            loss = model.loss(x0)
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            losses[i] = loss.item()
+        
+        model.save_model()
+        
+        train_loss = losses.mean().item()
+        val_loss = test_model(model, val_set, batch_size)
+
+        print(f"Epoch: {epoch}")
+        print(f"Train loss: {train_loss}")
+        print(f"Validation loss: {val_loss}")
+        
+        epoch_loss[epoch, 0] = train_loss
+        epoch_loss[epoch, 1] = val_loss
+
+        if save_params:
+            curr_params = torch.concatenate([p.detach().cpu().flatten() for p in model.parameters() if p.requires_grad])
+            parameters[epoch] = curr_params
+    
+    return epoch_loss, parameters
+
+def sample_intermediate_images(model, title="Sampled images"):
+    model.eval()
+    _, xts = model.sample()
+    n_images = len(xts)
+    fig, axs = plt.subplots(1, n_images, figsize=(20, 2))
+    for i in range(n_images):
+        img = xts[i] * 0.5 + 0.5
+        img = torch.clamp(img, 0, 1)
+        img = img.view(*model.dimensions).permute(1, 2, 0).cpu().numpy()
+        axs[i].imshow(img, cmap='gray')
+        axs[i].axis('off')
+    fig.suptitle(title)
+    plt.show()
+    model.train()
+
+def sample_grid(model, title="Sampled images"):
+    model.eval()
+    print("Sampling 9 images for grid...")
+    fig, axs = plt.subplots(3, 3, figsize=(8,8))
+    for i in range(9):
+        xt, _ = model.sample()
+        xt = (xt + 1) / 2
+        xt = torch.clamp(xt, 0, 1)
+        img = xt.view(*model.dimensions).permute(1, 2, 0).cpu().numpy()
+        axs[i//3, i%3].imshow(img, cmap='gray')
+        axs[i//3, i%3].axis('off')
+    fig.suptitle(title)
+    plt.show()
+    model.train()
+
+def sample_approved_grid(model, title):
+    model.eval()
+    images = []
+    i = 1
+    while len(images) < 9:
+        print(f"Sampling image {i}...")
+        
+        xt, _ = model.sample()
+        xt = (xt + 1) / 2
+        xt = torch.clamp(xt, 0, 1)
+        img = xt.view(*model.dimensions).permute(1, 2, 0).cpu().numpy()
+        plt.imshow(img)
+        plt.axis('off')
+        plt.title(f"Image {i}")
+        plt.show()
+
+        approved = input("Approve image? (y/n): ")
+        if approved == 'y':
+            images.append(img)
+            i += 1
+        elif approved == 'n':
+            print("Image rejected")
+        else:
+            print("Invalid input")
+        
+        clear_output(wait=True)
+
+    fig, axs = plt.subplots(3, 3, figsize=(8,8))
+    for i in range(9):
+        axs[i//3, i%3].imshow(images[i], cmap='gray')
+        axs[i//3, i%3].axis('off')
+    fig.suptitle(title)
+    plt.show()
