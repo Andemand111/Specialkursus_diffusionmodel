@@ -4,6 +4,7 @@ from torch.utils.data import random_split
 import torch
 
 data = CelebA(size = 32)
+torch.seed = 42
 
 split_fracs = [0.8, 0.15, 0.05]
 train_set, test_set, val_set = random_split(data, split_fracs)
@@ -16,13 +17,13 @@ noise_schedule = NoiseSchedule(1e-4, 0.02, 1000)
 
 network_args = {
     "in_channels": dimensions[0], 
-    "model_channels": 96, 
+    "model_channels": 94, 
     "out_channels": dimensions[0], 
     "num_res_blocks": 1, 
-    "attention_resolutions": [4], 
+    "attention_resolutions": [2], 
     "dropout": 0.1,
-    "num_heads": 4,
-    "num_heads_upsample": 4,
+    "num_heads": 16,
+    "num_heads_upsample": 16,
 }
 
 big_network = UNetModel(**network_args)
@@ -33,11 +34,12 @@ big_model.load_model()
 num_params = sum(p.numel() for p in big_model.parameters() if p.requires_grad)
 print("Number of parameters: ", num_params)
 
-training_loop(
+losses, _ = training_loop(
     model = big_model, 
     epochs = 30, 
     train_set = train_set, 
     val_set = val_set,  
-    test_set = test_set, 
     batch_size = 64, 
     save_params=False)
+
+torch.save(losses, "../models/big_model_losses.pt")

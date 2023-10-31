@@ -12,6 +12,12 @@ import numpy as np
 mse = nn.MSELoss()
 
 def SinusoidalEmbeddings(ts):
+    ## ts: (batch_size, 1)
+
+    ## embeddings: (batch_size, 256)
+
+    ## 256 dimensional embeddings used for the positional encoding
+
     time_dimension = 256
     half_dim =  time_dimension // 2
     embeddings = torch.log(torch.tensor(10000)) / (half_dim - 1)
@@ -22,6 +28,15 @@ def SinusoidalEmbeddings(ts):
     return embeddings
 
 class NoiseSchedule:
+    ## Noise schedule for the noise added to the images
+    ## beta_start: starting value for beta
+    ## beta_end: ending value for beta
+    ## time_steps: number of time steps
+    ## the noise is then a linear interpolation between beta_start and beta_end such that 
+    ## beta_0 = beta_start
+    ## beta_T = beta_end
+    ## beta_t = beta_start + (beta_end - beta_start) * t / T
+
     def __init__(self, beta_start, beta_end, time_steps):
         super().__init__()
 
@@ -41,9 +56,18 @@ class NoiseSchedule:
         self.sigma = torch.sqrt(self.sigma_sq)
 
     def sample_time_steps(self, n):
+        ## n: number of time steps to sample
+        ## return timesteps t ~ U(1, T) (but zero indexed)
+
         return torch.randint(self.time_steps, (n,1))
 
     def make_noisy_images(self, x_0, t):
+        ## x_0: initial image
+        ## t: time steps to sample
+        ## return x_t: noisy image
+        ## return eps: noise
+        ## return mu: mean of the distribution
+
         eps = torch.randn(x_0.shape)
         mu = self.sqrt_alpha_hat[t] * x_0
         std  = self.sqrt_one_minus_alpha_hat[t]
@@ -52,7 +76,12 @@ class NoiseSchedule:
         return x_t, eps, mu
     
 class CIFAR10(Dataset):
+    ## CIFAR10 dataset
+
     def __init__(self, n = None):
+        ## n: number of images to use
+        ## if n is None, use all images
+
         super().__init__()
 
         data = torchvision.datasets.CIFAR10(root='../data', download=True, transform=transforms.ToTensor())
@@ -71,7 +100,13 @@ class CIFAR10(Dataset):
         return self.data[idx]
     
 class CelebA(Dataset):
+    ## CelebA dataset
+
     def __init__(self, n = None, size=32):
+        ## n: number of images to use
+        ## if n is None, use all images
+        ## size: size of the images
+
         super().__init__()
 
         self.n = n
@@ -91,11 +126,20 @@ class CelebA(Dataset):
         return self.n
     
     def __getitem__(self, idx):
+        ## return image in range [-1, 1]
+
         return self.images[idx][0] * 2 - 1
     
     
 class Model(nn.Module):
-    def __init__(self, network, noise_schedule, dimensions, device):
+    ## Base class for models
+
+    def __init__(self, network, noise_schedule, dimensions, device):    
+        ## network: network to use
+        ## noise_schedule: noise schedule to use
+        ## dimensions: dimensions of the images
+        ## device: device to use (cpu or gpu)
+
         super().__init__()
         self.network = network.to(device)   
         self.noise_schedule = noise_schedule
@@ -104,11 +148,17 @@ class Model(nn.Module):
         self.device = device
     
     def sample(self, xt=None, T=None):
+        ## xt: initial image
+        ## T: number of time steps to sample
+        ## return xt: sampled image
+        ## return progress_list: list of sampled images at certain time steps
+
+        ## the time steps at which progress is saved (to show reverse diffusion process)
         steps = torch.linspace(0, self.noise_schedule.time_steps, 10, dtype=torch.int)
         progress_list = []
 
         with torch.no_grad():
-            xt = torch.randn((1, self.img_size)) if xt is None else xt
+            xt = torch.randn((1, self.img_size)) if xt is None else xt  ## xt ~ N(0, I)
             T = self.noise_schedule.time_steps if T is None else T
             
             print("Sampling image..")
@@ -117,7 +167,7 @@ class Model(nn.Module):
                 
                 xt = xt.to(self.device)
 
-                xt = self.get_prior(xt, t)
+                xt = self.get_prior(xt, t)  ## find xt ~ p(x_{t-1} | x_t, x_0)
                 if t in steps:
                     progress_list.append(xt.view(*self.dimensions).cpu())
 
@@ -150,6 +200,13 @@ class SimpleModel(Model):
         self.path = "../models/simple_model.pt"
     
     def loss(self, x0, ts= None):
+        ## x0: initial image
+        ## ts: time steps to sample
+        ## return loss: loss
+
+        ## loss is calulated as:
+        ## L_simple = E_{t ~ U(1, T)} [ || eps_true - eps_pred ||^2 ]
+
         batch_size = len(x0)
 
         ts = self.noise_schedule.sample_time_steps(batch_size) if ts is None else ts
@@ -161,13 +218,21 @@ class SimpleModel(Model):
         eps = eps.to(self.device)
         ts = ts.to(self.device)
 
-        pred = self(xt, ts.flatten())
+        pred = self(xt, ts.flatten())   ## predict eps = \hat{\eps}
         loss = mse(pred.flatten(1), eps)
         return loss
     
     def get_prior(self, xt, t):
+        ## xt: image at time t
+        ## t: time step
+        ## return xt: image at time t - 1
+
         t_for_model = torch.tensor([t]).to(self.device)
         eps = self(xt.view(1, *self.dimensions), t_for_model).flatten()
+
+        ## x_{t - 1} = k1 * (x_t - k2 * eps) + sigma * eps
+        ## k1 = 1 / sqrt(alpha)
+        ## k2 = (1 - alpha) / sqrt(1 - alpha_hat)
 
         k1 = 1 / self.noise_schedule.sqrt_alpha[t]
         k2 = (1 - self.noise_schedule.alpha[t]) / self.noise_schedule.sqrt_one_minus_alpha_hat[t]
@@ -188,6 +253,13 @@ class x0Model(Model):
         self.path = "../models/x0_model.pt"
     
     def loss(self, x0, ts= None):
+        ## x0: initial image
+        ## ts: time steps to sample
+        ## return loss: loss
+
+        ## loss is calulated as:
+        ## L_x0 = E_{t ~ U(1, T)} [ || x_0 - x_t ||^2 ]
+
         batch_size = len(x0)
         ts = self.noise_schedule.sample_time_steps(batch_size) if ts is None else ts
 
@@ -203,11 +275,17 @@ class x0Model(Model):
         return loss
     
     def get_prior(self, xt, t):
+        ## xt: image at time t
+        ## t: time step
+        ## return xt: image at time t - 1
+
         t_for_model = torch.tensor([t]).to(self.device)
         x0 = self(xt.view(1, *self.dimensions), t_for_model).flatten()
 
         if t == 0:
             return x0
+        
+        ## x_{t - 1} = k1 * (x_t - k2 * x_0) + sigma * eps
         
         k1 = self.noise_schedule.sqrt_alpha[t] * (1 - self.noise_schedule.alpha_hat[t - 1]) * xt
         k2 = self.noise_schedule.sqrt_alpha_hat[t - 1] * (1 - self.noise_schedule.alpha[t]) * x0
@@ -273,6 +351,11 @@ class ELBOModel(Model):
 
 
 def test_model(model, dataset, batch_size = 64):
+    ## model: model to test
+    ## dataset: dataset to test on
+    ## batch_size: batch size to use
+    ## return test_loss: test loss
+
     model.eval()
     model.to(model.device)
     test_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
@@ -286,6 +369,9 @@ def test_model(model, dataset, batch_size = 64):
 
     
 def show_losses(losses, test_loss = None):
+    ## losses: losses to show
+    ## test_loss: test loss to show
+
     train_losses = losses[:, 0]
     val_losses = losses[:, 1]
     
@@ -303,6 +389,16 @@ def show_losses(losses, test_loss = None):
     plt.show()
 
 def training_loop(model, epochs, train_set, val_set, batch_size=64, save_params=False):
+    ## model: model to train
+    ## epochs: number of epochs to train for
+    ## train_set: training set
+    ## val_set: validation set
+    ## batch_size: batch size to use
+    ## save_params: whether to save the parameters of the model at each epoch
+
+    ## return epoch_loss: losses for each epoch
+    ## return parameters: parameters for each epoch
+
     torch.autograd.set_detect_anomaly(True)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-5, weight_decay=1e-4)
     epoch_loss = torch.zeros((epochs, 2))
@@ -337,12 +433,18 @@ def training_loop(model, epochs, train_set, val_set, batch_size=64, save_params=
         epoch_loss[epoch, 1] = val_loss
 
         if save_params:
+            ## save parameters if they have gradients
             curr_params = torch.concatenate([p.detach().cpu().flatten() for p in model.parameters() if p.requires_grad])
             parameters[epoch] = curr_params
     
     return epoch_loss, parameters
 
 def sample_intermediate_images(model, title="Sampled images"):
+    ## model: model to sample from
+    ## title: title of the plot
+
+    ## sample images during the reverse diffusion process
+
     model.eval()
     _, xts = model.sample()
     n_images = len(xts)
@@ -358,6 +460,11 @@ def sample_intermediate_images(model, title="Sampled images"):
     model.train()
 
 def sample_grid(model, title="Sampled images"):
+    ## model: model to sample from
+    ## title: title of the plot
+
+    ## sample 9 images from the model
+
     model.eval()
     print("Sampling 9 images for grid...")
     fig, axs = plt.subplots(3, 3, figsize=(8,8))
@@ -373,6 +480,13 @@ def sample_grid(model, title="Sampled images"):
     model.train()
 
 def sample_approved_grid(model, title):
+    ## model: model to sample from
+    ## title: title of the plot
+
+    ## sample 9 images from the model
+    ## ask the user if the images are approved
+    ## if not approved, sample another image
+
     model.eval()
     images = []
     i = 1
