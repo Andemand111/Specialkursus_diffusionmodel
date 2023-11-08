@@ -11,12 +11,16 @@ import numpy as np
 
 mse = nn.MSELoss()
 
+## comment code with """ """ to make it easier to read in the notebook
+## also tell what the function does and what the input and output is and what type they are
+
 def SinusoidalEmbeddings(ts):
-    ## ts: (batch_size, 1)
+    """
+    ts (torch.tensor): time steps (batch_size, 1)
+    return (torch.tensor): sinusoidal embeddings (batch_size, 256)
 
-    ## embeddings: (batch_size, 256)
-
-    ## 256 dimensional embeddings used for the positional encoding
+    Embeds the time steps using sinusoidal embeddings as described in the paper
+    """
 
     time_dimension = 256
     half_dim =  time_dimension // 2
@@ -28,14 +32,16 @@ def SinusoidalEmbeddings(ts):
     return embeddings
 
 class NoiseSchedule:
-    ## Noise schedule for the noise added to the images
-    ## beta_start: starting value for beta
-    ## beta_end: ending value for beta
-    ## time_steps: number of time steps
-    ## the noise is then a linear interpolation between beta_start and beta_end such that 
-    ## beta_0 = beta_start
-    ## beta_T = beta_end
-    ## beta_t = beta_start + (beta_end - beta_start) * t / T
+    """
+    
+    beta_start (float): start value of beta
+    beta_end (float): end value of beta
+    time_steps (int): number of time steps
+
+    Noise schedule as described in the paper
+    Produces gradually more noise as time goes on
+
+    """
 
     def __init__(self, beta_start, beta_end, time_steps):
         super().__init__()
@@ -44,7 +50,12 @@ class NoiseSchedule:
         self.beta_end = beta_end
         self.time_steps = time_steps
 
+
+        ## the diffusion process is a simple linear interpolation between beta_start and beta_end
         self.beta = torch.linspace(self.beta_start, self.beta_end, self.time_steps)
+
+        ## the necessary constants for the diffusion process
+        ## see more in the paper
         self.alpha = 1 - self.beta
         self.alpha_hat = torch.cumprod(self.alpha, dim=0)
         self.sqrt_alpha = torch.sqrt(self.alpha)
@@ -56,17 +67,25 @@ class NoiseSchedule:
         self.sigma = torch.sqrt(self.sigma_sq)
 
     def sample_time_steps(self, n):
-        ## n: number of time steps to sample
-        ## return timesteps t ~ U(1, T) (but zero indexed)
+        """ 
+        n (int): number of time steps to sample
+        return (torch.tensor): sampled time steps
+
+        Samples n time steps uniformly from the time steps
+        
+        """
 
         return torch.randint(self.time_steps, (n,1))
 
     def make_noisy_images(self, x_0, t):
-        ## x_0: initial image
-        ## t: time steps to sample
-        ## return x_t: noisy image
-        ## return eps: noise
-        ## return mu: mean of the distribution
+        """
+        x_0 (torch.tensor): initial image
+        t (torch.tensor): time steps
+        return x_t (torch.tensor): noisy images
+
+        Makes noisy images from the initial image x_0
+        
+        """
 
         eps = torch.randn(x_0.shape)
         mu = self.sqrt_alpha_hat[t] * x_0
@@ -76,11 +95,20 @@ class NoiseSchedule:
         return x_t, eps, mu
     
 class CIFAR10(Dataset):
-    ## CIFAR10 dataset
+    """
+
+    CIFAR10 dataset
+    
+    """
 
     def __init__(self, n = None):
-        ## n: number of images to use
-        ## if n is None, use all images
+        """
+
+        n (int): number of images to use
+        if n is None, use all images
+
+        
+        """
 
         super().__init__()
 
@@ -100,12 +128,20 @@ class CIFAR10(Dataset):
         return self.data[idx]
     
 class CelebA(Dataset):
-    ## CelebA dataset
+    """
+    
+    CelebA dataset
+
+    
+    """
 
     def __init__(self, n = None, size=32):
-        ## n: number of images to use
-        ## if n is None, use all images
-        ## size: size of the images
+        """
+
+        n (int): number of images to use
+        if n is None, use all images
+        
+        """
 
         super().__init__()
 
@@ -132,13 +168,21 @@ class CelebA(Dataset):
     
     
 class Model(nn.Module):
-    ## Base class for models
+    """
+    
+    Model to use for training
+    
+    """
 
     def __init__(self, network, noise_schedule, dimensions, device):    
-        ## network: network to use
-        ## noise_schedule: noise schedule to use
-        ## dimensions: dimensions of the images
-        ## device: device to use (cpu or gpu)
+        """
+        
+        network (nn.Module): network to use
+        noise_schedule (NoiseSchedule): noise schedule to use
+        dimensions (tuple): dimensions of the images
+        device (torch.device): device to use
+        
+        """
 
         super().__init__()
         self.network = network.to(device)   
@@ -148,10 +192,18 @@ class Model(nn.Module):
         self.device = device
     
     def sample(self, xt=None, T=None):
-        ## xt: initial image
-        ## T: number of time steps to sample
-        ## return xt: sampled image
-        ## return progress_list: list of sampled images at certain time steps
+        """
+        
+        xt (torch.tensor): initial image
+        T (int): number of time steps to sample
+        return xt (torch.tensor): sampled image
+        return progress_list (list): list of images sampled at different time steps
+        
+        Samples an image from the model
+        If xt is None, sample from N(0, I)
+        If T is None, sample for all time steps
+        
+        """
 
         ## the time steps at which progress is saved (to show reverse diffusion process)
         steps = torch.linspace(0, self.noise_schedule.time_steps, 10, dtype=torch.int)
@@ -200,12 +252,17 @@ class SimpleModel(Model):
         self.path = "../models/simple_model.pt"
     
     def loss(self, x0, ts= None):
-        ## x0: initial image
-        ## ts: time steps to sample
-        ## return loss: loss
-
-        ## loss is calulated as:
-        ## L_simple = E_{t ~ U(1, T)} [ || eps_true - eps_pred ||^2 ]
+        """
+        
+        x0 (torch.tensor): initial image
+        ts (torch.tensor): time steps to sample
+        return loss (torch.tensor): loss
+        
+        Calculates the loss of the model
+        Loss is calculated as:
+        L = E_{t ~ U(1, T)} [ || eps - \hat{eps} ||^2 ]
+        
+        """
 
         batch_size = len(x0)
 
@@ -223,9 +280,15 @@ class SimpleModel(Model):
         return loss
     
     def get_prior(self, xt, t):
-        ## xt: image at time t
-        ## t: time step
-        ## return xt: image at time t - 1
+        """
+        
+        xt (torch.tensor): image at time t
+        t (int): time step
+        return xt (torch.tensor): image at time t - 1
+        
+        Finds the prior of xt, that is x{t-1}
+        
+        """
 
         t_for_model = torch.tensor([t]).to(self.device)
         eps = self(xt.view(1, *self.dimensions), t_for_model).flatten()
@@ -253,12 +316,17 @@ class x0Model(Model):
         self.path = "../models/x0_model.pt"
     
     def loss(self, x0, ts= None):
-        ## x0: initial image
-        ## ts: time steps to sample
-        ## return loss: loss
-
-        ## loss is calulated as:
-        ## L_x0 = E_{t ~ U(1, T)} [ || x_0 - x_t ||^2 ]
+        """
+        
+        x0 (torch.tensor): initial image
+        ts (torch.tensor): time steps to sample
+        return loss (torch.tensor): loss
+        
+        Calculates the loss of the model
+        Loss is calculated as:
+        L = E_{t ~ U(1, T)} [ || x_0 - \hat{x_0} ||^2 ]
+        
+        """
 
         batch_size = len(x0)
         ts = self.noise_schedule.sample_time_steps(batch_size) if ts is None else ts
@@ -275,9 +343,15 @@ class x0Model(Model):
         return loss
     
     def get_prior(self, xt, t):
-        ## xt: image at time t
-        ## t: time step
-        ## return xt: image at time t - 1
+        """
+        
+        xt (torch.tensor): image at time t
+        t (int): time step
+        return xt (torch.tensor): image at time t - 1
+        
+        Finds the prior of xt, that is x{t-1}
+        
+        """
 
         t_for_model = torch.tensor([t]).to(self.device)
         x0 = self(xt.view(1, *self.dimensions), t_for_model).flatten()
@@ -351,10 +425,16 @@ class ELBOModel(Model):
 
 
 def test_model(model, dataset, batch_size = 64):
-    ## model: model to test
-    ## dataset: dataset to test on
-    ## batch_size: batch size to use
-    ## return test_loss: test loss
+    """
+    
+    model (Model): model to test
+    dataset (Dataset): dataset to test on
+    batch_size (int): batch size to use
+    return test_loss (float): test loss
+    
+    Tests the model on the dataset by calculating the loss
+    
+    """
 
     model.eval()
     model.to(model.device)
@@ -369,8 +449,15 @@ def test_model(model, dataset, batch_size = 64):
 
     
 def show_losses(losses, test_loss = None):
-    ## losses: losses to show
-    ## test_loss: test loss to show
+    """
+    
+    losses (list): losses for each epoch
+    test_loss (float): test loss
+    return None
+    
+    Plots the losses
+    
+    """
 
     train_losses = losses[:, 0]
     val_losses = losses[:, 1]
@@ -389,15 +476,20 @@ def show_losses(losses, test_loss = None):
     plt.show()
 
 def training_loop(model, epochs, train_set, val_set, batch_size=64, save_params=False):
-    ## model: model to train
-    ## epochs: number of epochs to train for
-    ## train_set: training set
-    ## val_set: validation set
-    ## batch_size: batch size to use
-    ## save_params: whether to save the parameters of the model at each epoch
-
-    ## return epoch_loss: losses for each epoch
-    ## return parameters: parameters for each epoch
+    """
+    
+    model (Model): model to train
+    epochs (int): number of epochs to train for
+    train_set (Dataset): dataset to train on
+    val_set (Dataset): dataset to validate on
+    batch_size (int): batch size to use
+    save_params (bool): whether to save the parameters of the model
+    return epoch_loss (torch.tensor): losses for each epoch
+    return parameters (torch.tensor): parameters for each epoch
+    
+    Trains the model for the specified number of epochs
+    
+    """
 
     torch.autograd.set_detect_anomaly(True)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-5, weight_decay=1e-4)
@@ -440,10 +532,16 @@ def training_loop(model, epochs, train_set, val_set, batch_size=64, save_params=
     return epoch_loss, parameters
 
 def sample_intermediate_images(model, title="Sampled images"):
-    ## model: model to sample from
-    ## title: title of the plot
-
-    ## sample images during the reverse diffusion process
+    """
+    
+    model (Model): model to sample from
+    title (str): title of the plot
+    return None
+    
+    Samples 10 images from the model and plots them
+    The 10 images are sampled at different time steps to show the reverse diffusion process
+    
+    """
 
     model.eval()
     _, xts = model.sample()
@@ -460,10 +558,15 @@ def sample_intermediate_images(model, title="Sampled images"):
     model.train()
 
 def sample_grid(model, title="Sampled images"):
-    ## model: model to sample from
-    ## title: title of the plot
-
-    ## sample 9 images from the model
+    """
+    
+    model (Model): model to sample from
+    title (str): title of the plot
+    return None
+    
+    Samples 9 images from the model and plots them
+    
+    """
 
     model.eval()
     print("Sampling 9 images for grid...")
@@ -480,12 +583,18 @@ def sample_grid(model, title="Sampled images"):
     model.train()
 
 def sample_approved_grid(model, title):
-    ## model: model to sample from
-    ## title: title of the plot
-
-    ## sample 9 images from the model
-    ## ask the user if the images are approved
-    ## if not approved, sample another image
+    """
+    
+    model (Model): model to sample from
+    title (str): title of the plot
+    return None
+    
+    Samples 9 images from the model and plots them
+    Asks the user if they approve of the image
+    If the user approves, the image is added to the plot
+    If the user does not approve, the image is rejected and a new image is sampled
+    
+    """
 
     model.eval()
     images = []

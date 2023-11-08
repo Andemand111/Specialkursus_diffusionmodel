@@ -1,3 +1,15 @@
+"""
+
+The code has been copied from the paper:
+Alex Nichol and Prafulla Dhariwal. Improved denoising diffusion probabilistic models, 2021.
+
+From the following repository:
+https://github.com/openai/improved-diffusion
+
+All credit goes to the authors of the paper and the repository.
+"""
+
+
 from abc import abstractmethod
 
 import math
