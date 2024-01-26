@@ -17,7 +17,7 @@ noise_schedule = NoiseSchedule(1e-4, 0.02, 1000)
 
 network_args = {
     "in_channels": dimensions[0], 
-    "model_channels": 06, 
+    "model_channels": 64, 
     "out_channels": dimensions[0], 
     "num_res_blocks": 2, 
     "attention_resolutions": [2], 
