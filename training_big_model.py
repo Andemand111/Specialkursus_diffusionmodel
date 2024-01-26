@@ -19,8 +19,8 @@ network_args = {
     "in_channels": dimensions[0], 
     "model_channels": 64, 
     "out_channels": dimensions[0], 
-    "num_res_blocks": 2, 
-    "attention_resolutions": [2], 
+    "num_res_blocks": 4, 
+    "attention_resolutions": [4], 
     "dropout": 0.1,
     "num_heads": 16,
     "num_heads_upsample": 16,
@@ -39,7 +39,7 @@ losses, _ = training_loop(
     epochs = 30, 
     train_set = train_set, 
     val_set = val_set,  
-    batch_size = 64, 
+    batch_size = 32, 
     save_params=False)
 
 torch.save(losses, "../models/big_model_losses.pt")
